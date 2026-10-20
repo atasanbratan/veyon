@@ -111,8 +111,16 @@ void LabAudioIndicator::setLevel( float level )
 
 void LabAudioIndicator::closeEvent( QCloseEvent* event )
 {
-	// The notice stays visible for as long as the teacher keeps the audio mode active.
-	event->ignore();
+	// The student cannot dismiss the notice while the teacher keeps the audio mode active;
+	// programmatic closes (application shutdown) are allowed.
+	if( event->spontaneous() )
+	{
+		event->ignore();
+	}
+	else
+	{
+		event->accept();
+	}
 }
 
 
@@ -218,6 +226,7 @@ void LabAudioClient::onReadyRead()
 			payload.size() <= 4 + MaxFrameBytes )
 		{
 			m_playback->mixer().addPacket( 0, qFromBigEndian<quint32>( payload.constData() ), payload.mid( 4 ) );
+			Q_EMIT audioReceived( int( payload.size() ) );
 		}
 	}
 	if( error )

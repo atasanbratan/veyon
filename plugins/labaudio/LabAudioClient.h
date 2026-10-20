@@ -64,6 +64,9 @@ public:
 
 	static constexpr int ReconnectIntervalMs = 2000;
 
+Q_SIGNALS:
+	void audioReceived( int bytes );
+
 private:
 	void connectToHub();
 	void onConnected();

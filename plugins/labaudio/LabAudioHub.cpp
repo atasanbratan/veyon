@@ -163,6 +163,7 @@ void LabAudioHub::readClient( int id )
 		{
 			const auto sequence = qFromBigEndian<quint32>( payload.constData() );
 			m_playback->mixer().addPacket( id, sequence, payload.mid( 4 ) );
+			Q_EMIT studentPacketReceived( id );
 		}
 		else if( type == FrameType::Bye )
 		{
@@ -287,12 +288,15 @@ void LabAudioHub::updateAudio()
 void LabAudioHub::sendTeacherPacket( const QByteArray& packet )
 {
 	const auto data = frame( FrameType::Audio, audioPayload( m_sequence++, packet ) );
+	int receivers = 0;
 	for( auto& client : m_clients )
 	{
 		if( client.authenticated && ( client.roles & ReceiveTeacher ) && client.socket &&
 			client.socket->bytesToWrite() < MaxQueuedBytes )
 		{
 			client.socket->write( data );
+			++receivers;
 		}
 	}
+	Q_EMIT teacherPacketSent( receivers );
 }

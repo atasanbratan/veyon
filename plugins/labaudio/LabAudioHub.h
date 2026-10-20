@@ -52,6 +52,10 @@ public:
 	static constexpr int MaxClients = 100;
 	static constexpr qint64 MaxQueuedBytes = 64 * 1024;	// drop audio to a client that falls behind
 
+Q_SIGNALS:
+	void teacherPacketSent( int receivers );
+	void studentPacketReceived( int clientId );
+
 private:
 	struct Client
 	{

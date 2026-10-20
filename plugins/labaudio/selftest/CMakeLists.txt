@@ -9,3 +9,10 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
 add_executable(labaudio_selftest labaudio_selftest.cpp ../LabAudioEngine.cpp ../LabAudioEngine.h)
 target_link_libraries(labaudio_selftest PRIVATE Qt6::Core Qt6::Multimedia PkgConfig::OPUS)
+
+# Hardware loopback: hub + client on this computer with the real microphone and headset.
+find_package(Qt6 REQUIRED COMPONENTS Widgets Network)
+add_executable(labaudio_loopback labaudio_loopback.cpp
+	../LabAudioHub.cpp ../LabAudioHub.h ../LabAudioClient.cpp ../LabAudioClient.h ../LabAudioEngine.cpp ../LabAudioEngine.h)
+target_include_directories(labaudio_loopback BEFORE PRIVATE shim)
+target_link_libraries(labaudio_loopback PRIVATE Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::OPUS)

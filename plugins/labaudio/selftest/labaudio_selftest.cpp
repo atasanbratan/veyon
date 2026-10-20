@@ -11,6 +11,8 @@
  */
 
 #include <QCoreApplication>
+#include <QAudioDevice>
+#include <QMediaDevices>
 #include <QtMath>
 #include <cstdio>
 
@@ -204,6 +206,12 @@ static void testMixer()
 int main( int argc, char** argv )
 {
 	QCoreApplication app( argc, argv );
+	if( argc > 1 && QByteArray( argv[1] ) == "--devices" )
+	{
+		for( const auto& d : QMediaDevices::audioInputs() ) { std::printf( "input:  %s\n", qPrintable( d.description() ) ); }
+		for( const auto& d : QMediaDevices::audioOutputs() ) { std::printf( "output: %s\n", qPrintable( d.description() ) ); }
+		return 0;
+	}
 	testFraming();
 	testMixer();
 	std::printf( failures ? "\n%d FAILED\n" : "\nALL PASSED\n", failures );
