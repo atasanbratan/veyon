@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/labaudio" >
+        <file>labaudio.png</file>
+        <file>broadcast.png</file>
+        <file>talk.png</file>
+        <file>listen.png</file>
+    </qresource>
+</RCC>
