@@ -102,7 +102,7 @@ static void testMixer()
 	format.setChannelCount( 1 );
 	format.setSampleFormat( QAudioFormat::Int16 );
 	mixer.setOutputFormat( format );
-	mixer.open( QIODevice::ReadOnly );
+	mixer.open( QIODevice::ReadOnly | QIODevice::Unbuffered );
 
 	// Before enough data is buffered, output is silence.
 	mixer.addPacket( 1, 0, encodeSineFrame( encoder, 0 ) );
@@ -125,7 +125,7 @@ static void testMixer()
 	// Two streams are summed.
 	LabAudioMixer two;
 	two.setOutputFormat( format );
-	two.open( QIODevice::ReadOnly );
+	two.open( QIODevice::ReadOnly | QIODevice::Unbuffered );
 	auto encoder2 = opus_encoder_create( SampleRate, Channels, OPUS_APPLICATION_VOIP, &err );
 	for( int i = 0; i < 6; ++i )
 	{
@@ -143,7 +143,7 @@ static void testMixer()
 	// Lost packets are concealed rather than stalling the stream.
 	LabAudioMixer lossy;
 	lossy.setOutputFormat( format );
-	lossy.open( QIODevice::ReadOnly );
+	lossy.open( QIODevice::ReadOnly | QIODevice::Unbuffered );
 	auto encoder3 = opus_encoder_create( SampleRate, Channels, OPUS_APPLICATION_VOIP, &err );
 	for( int i = 0; i < 10; ++i )
 	{
@@ -167,7 +167,7 @@ static void testMixer()
 	device.setChannelCount( 2 );
 	device.setSampleFormat( QAudioFormat::Float );
 	resampled.setOutputFormat( device );
-	resampled.open( QIODevice::ReadOnly );
+	resampled.open( QIODevice::ReadOnly | QIODevice::Unbuffered );
 	auto encoder4 = opus_encoder_create( SampleRate, Channels, OPUS_APPLICATION_VOIP, &err );
 	for( int i = 0; i < 8; ++i )
 	{

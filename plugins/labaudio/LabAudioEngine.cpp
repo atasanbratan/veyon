@@ -427,7 +427,7 @@ bool LabAudioPlayback::start()
 	}
 	const auto format = preferredLabFormat( device );
 	m_mixer->setOutputFormat( format );
-	m_mixer->open( QIODevice::ReadOnly );
+	m_mixer->open( QIODevice::ReadOnly | QIODevice::Unbuffered );
 	m_sink = new QAudioSink( device, format, this );
 	m_sink->setBufferSize( format.bytesForDuration( 60000 ) );
 	m_sink->start( m_mixer );
