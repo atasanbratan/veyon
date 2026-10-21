@@ -24,6 +24,7 @@
 
 #include <QCoreApplication>
 #include <QMessageBox>
+#include <QNetworkInterface>
 #include <QTcpSocket>
 
 #include "ComputerControlInterface.h"
@@ -113,6 +114,34 @@ Feature::Uid LabAudioFeaturePlugin::metaFeature( Feature::Uid featureUid ) const
 
 
 
+QStringList LabAudioFeaturePlugin::localAddresses()
+{
+	// All usable addresses of the teacher's computer, so students can fall back when the route
+	// Veyon Master used is not reachable for the audio port (multi-homed teacher PCs).
+	QStringList addresses;
+	const auto interfaces = QNetworkInterface::allInterfaces();
+	for( const auto& iface : interfaces )
+	{
+		const auto flags = iface.flags();
+		if( ( flags & QNetworkInterface::IsUp ) == 0 || ( flags & QNetworkInterface::IsRunning ) == 0 ||
+			( flags & QNetworkInterface::IsLoopBack ) )
+		{
+			continue;
+		}
+		for( const auto& entry : iface.addressEntries() )
+		{
+			const auto ip = entry.ip();
+			if( ip.protocol() == QAbstractSocket::IPv4Protocol && ip.isLinkLocal() == false )
+			{
+				addresses.append( ip.toString() );
+			}
+		}
+	}
+	return addresses;
+}
+
+
+
 int LabAudioFeaturePlugin::hubPort() const
 {
 	return DefaultHubPort + VeyonCore::sessionId();
@@ -155,6 +184,7 @@ bool LabAudioFeaturePlugin::controlFeature( Feature::Uid featureUid, Operation o
 			sendFeatureMessage( FeatureMessage{ m_clientFeature.uid(), FeatureCommand::StartClient }
 									.addArgument( Argument::Token, arguments.value( argToString(Argument::Token), m_token ) )
 									.addArgument( Argument::HubHost, arguments.value( argToString(Argument::HubHost) ) )
+									.addArgument( Argument::HubAddresses, localAddresses() )
 									.addArgument( Argument::HubPort, arguments.value( argToString(Argument::HubPort), hubPort() ) )
 									.addArgument( Argument::Roles, arguments.value( argToString(Argument::Roles),
 																					int( ReceiveTeacher ) ) ),
@@ -302,8 +332,16 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonServerInterface& server, 
 				vCritical() << "invalid socket";
 				return false;
 			}
+			// Use plain IPv4 for IPv4-mapped peers ("::ffff:10.0.0.1").
+			auto peer = socket->peerAddress();
+			bool isIPv4 = false;
+			const auto ipv4 = peer.toIPv4Address( &isIPv4 );
+			if( isIPv4 )
+			{
+				peer = QHostAddress( ipv4 );
+			}
 			workers.sendMessageToUnmanagedSessionWorker(
-				FeatureMessage{ message }.addArgument( Argument::HubHost, socket->peerAddress().toString() ) );
+				FeatureMessage{ message }.addArgument( Argument::HubHost, peer.toString() ) );
 		}
 		else
 		{
@@ -352,7 +390,8 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonWorkerInterface& worker, 
 		case FeatureCommand::StartClient:
 			// A new mode replaces the previous connection (e.g. broadcast -> talk).
 			delete m_client;
-			m_client = new LabAudioClient( message.argument( Argument::HubHost ).toString(),
+			m_client = new LabAudioClient( QStringList{ message.argument( Argument::HubHost ).toString() } +
+											   message.argument( Argument::HubAddresses ).toStringList(),
 										   message.argument( Argument::HubPort ).toInt(),
 										   message.argument( Argument::Token ).toByteArray(),
 										   quint8( message.argument( Argument::Roles ).toInt() ) );

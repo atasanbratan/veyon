@@ -49,7 +49,8 @@ int main( int argc, char** argv )
 	QObject::connect( &hub, &LabAudioHub::teacherPacketSent, [&]( int receivers ) { teacherSent += receivers > 0; } );
 	QObject::connect( &hub, &LabAudioHub::studentPacketReceived, [&]( int ) { ++hubReceived; } );
 
-	LabAudioClient client( QStringLiteral( "127.0.0.1" ), port, token, roles );
+	// The first address is unreachable on purpose: the client must fall back to the next one.
+	LabAudioClient client( QStringList{ QStringLiteral( "192.0.2.1" ), QStringLiteral( "127.0.0.1" ) }, port, token, roles );
 	QObject::connect( &client, &LabAudioClient::audioReceived, [&]( int ) { ++studentReceived; } );
 
 	// An intruder with the wrong token must be refused.
@@ -78,7 +79,8 @@ int main( int argc, char** argv )
 	QTimer::singleShot( seconds * 1000, &app, []() { QCoreApplication::exit( 0 ); } );
 	app.exec();
 
-	const int expected = seconds * 50;	// 50 packets per second
+	// 50 packets per second, minus the connect timeout spent on the deliberately unreachable first address.
+	const int expected = ( seconds - LabAudioClient::ConnectTimeoutMs / 1000 ) * 50;
 	int failures = 0;
 	auto check = [&]( bool ok, const char* what ) { std::printf( "%s  %s\n", ok ? "PASS" : "FAIL", what ); failures += !ok; };
 	std::printf( "teacher packets sent %d, student received %d, hub received from student %d (expected ~%d each)\n",

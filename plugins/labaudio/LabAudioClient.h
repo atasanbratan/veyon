@@ -59,10 +59,13 @@ class LabAudioClient : public QObject
 {
 	Q_OBJECT
 public:
-	LabAudioClient( const QString& host, int port, const QByteArray& token, quint8 roles, QObject* parent = nullptr );
+	// hosts: addresses of the teacher's computer, tried in order (the first one is the preferred route).
+	LabAudioClient( const QStringList& hosts, int port, const QByteArray& token, quint8 roles, QObject* parent = nullptr );
 	~LabAudioClient() override;
 
 	static constexpr int ReconnectIntervalMs = 2000;
+	static constexpr int NextAddressDelayMs = 200;
+	static constexpr int ConnectTimeoutMs = 3000;
 
 Q_SIGNALS:
 	void audioReceived( int bytes );
@@ -72,11 +75,17 @@ private:
 	void onConnected();
 	void onReadyRead();
 	void onDisconnected();
+	QString currentHost() const;
 	void startAudio();
 	void stopAudio();
 	void sendPacket( const QByteArray& packet );
 
-	QString m_host;
+	QStringList m_hosts;
+	int m_hostIndex{0};
+	bool m_attemptActive{false};
+	bool m_wasConnected{false};
+	QString m_failReason;
+	QTimer m_connectTimer;
 	int m_port;
 	QByteArray m_token;
 	quint8 m_roles;

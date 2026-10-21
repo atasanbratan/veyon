@@ -42,6 +42,7 @@ public:
 	enum class Argument {
 		Token,
 		HubHost,
+		HubAddresses,
 		HubPort,
 		Roles
 	};
@@ -120,6 +121,7 @@ private:
 					const ComputerControlInterfaceList& computerControlInterfaces );
 	void sendHubCommand();
 	int hubPort() const;
+	static QStringList localAddresses();
 
 	const Feature m_labAudioFeature;
 	const Feature m_broadcastFeature;

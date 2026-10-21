@@ -59,6 +59,24 @@ sed 's/$/\r/' "$SRC/README.md" > "$STAGE/README.TXT"
 cp -r "$SRC/nsis" "$STAGE/"
 sed -e 's/^!define INSTALLER_NAME "veyon-\${VERSION}-win64-setup.exe"/!define INSTALLER_NAME "veyon-${VERSION}-labaudio-win64-setup.exe"/' \
 	"$BUILD/nsis/veyon.nsi" > "$STAGE/veyon.nsi"
+
+# The LabAudio hub runs inside veyon-worker.exe and must accept students on every network profile
+# (seen failing on a multi-homed teacher PC). Add the rule on install, remove it on uninstall.
+cat > "$STAGE/fw-install.nsh" <<'NSH'
+nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Veyon Lab Audio"'
+nsExec::ExecToLog 'netsh advfirewall firewall add rule name="Veyon Lab Audio" dir=in action=allow program="$INSTDIR\veyon-worker.exe" protocol=TCP localport=11500-11599 profile=any'
+NSH
+cat > "$STAGE/fw-uninstall.nsh" <<'NSH'
+nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Veyon Lab Audio"'
+NSH
+awk -v ins="$STAGE/fw-install.nsh" -v unins="$STAGE/fw-uninstall.nsh" '
+	{ print }
+	$0 == "File \"veyon-worker.exe\"" { while ((getline l < ins) > 0) print l; close(ins) }
+	$0 == "Section Uninstall" { while ((getline l < unins) > 0) print l; close(unins) }
+' "$STAGE/veyon.nsi" > "$STAGE/veyon.nsi.tmp" && mv "$STAGE/veyon.nsi.tmp" "$STAGE/veyon.nsi"
+rm -f "$STAGE/fw-install.nsh" "$STAGE/fw-uninstall.nsh"
+grep -q 'name="Veyon Lab Audio" dir=in' "$STAGE/veyon.nsi" || { echo "firewall rule not inserted"; exit 1; }
+
 # The native Windows makensis only accepts backslashes in relative File/bitmap/icon paths.
 sed -i -E '/^(File |!define MUI_[A-Z_]*(BITMAP|ICON) )/ s#/#\\#g' "$STAGE/veyon.nsi"
 

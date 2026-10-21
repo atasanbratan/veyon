@@ -125,9 +125,9 @@ void LabAudioIndicator::closeEvent( QCloseEvent* event )
 
 
 
-LabAudioClient::LabAudioClient( const QString& host, int port, const QByteArray& token, quint8 roles, QObject* parent ) :
+LabAudioClient::LabAudioClient( const QStringList& hosts, int port, const QByteArray& token, quint8 roles, QObject* parent ) :
 	QObject( parent ),
-	m_host( host ),
+	m_hosts( hosts ),
 	m_port( port ),
 	m_token( token ),
 	m_roles( roles ),
@@ -145,8 +145,27 @@ LabAudioClient::LabAudioClient( const QString& host, int port, const QByteArray&
 	} );
 
 	m_reconnectTimer.setSingleShot( true );
-	m_reconnectTimer.setInterval( ReconnectIntervalMs );
 	connect( &m_reconnectTimer, &QTimer::timeout, this, &LabAudioClient::connectToHub );
+
+	// A firewall that silently drops packets would otherwise block each attempt for ~20 s.
+	m_connectTimer.setSingleShot( true );
+	m_connectTimer.setInterval( ConnectTimeoutMs );
+	connect( &m_connectTimer, &QTimer::timeout, this, [this]() {
+		if( m_socket->state() != QAbstractSocket::ConnectedState )
+		{
+			m_failReason = tr( "no answer within %1 seconds (blocked by a firewall?)" ).arg( ConnectTimeoutMs / 1000 );
+			m_socket->abort();
+			onDisconnected();
+		}
+	} );
+
+	m_hosts.removeAll( QString() );
+	m_hosts.removeDuplicates();
+	if( m_hosts.isEmpty() )
+	{
+		m_indicator->setStatus( tr( "The address of the teacher's computer is unknown." ) );
+		return;
+	}
 
 	connectToHub();
 }
@@ -156,6 +175,7 @@ LabAudioClient::LabAudioClient( const QString& host, int port, const QByteArray&
 LabAudioClient::~LabAudioClient()
 {
 	m_reconnectTimer.stop();
+	m_connectTimer.stop();
 	if( m_socket->state() == QAbstractSocket::ConnectedState )
 	{
 		m_socket->write( frame( FrameType::Bye, {} ) );
@@ -175,16 +195,29 @@ void LabAudioClient::connectToHub()
 	{
 		return;
 	}
-	vDebug() << "LabAudio: connecting to" << m_host << m_port;
+	vDebug() << "LabAudio: connecting to" << currentHost() << m_port;
 	m_reader = {};
 	m_accepted = false;
-	m_socket->connectToHost( m_host, quint16( m_port ) );
+	m_wasConnected = false;
+	m_failReason.clear();
+	m_attemptActive = true;
+	m_connectTimer.start();
+	m_socket->connectToHost( currentHost(), quint16( m_port ) );
+}
+
+
+
+QString LabAudioClient::currentHost() const
+{
+	return m_hosts.value( m_hostIndex % qMax( 1, int( m_hosts.size() ) ) );
 }
 
 
 
 void LabAudioClient::onConnected()
 {
+	m_connectTimer.stop();
+	m_wasConnected = true;
 	m_socket->setSocketOption( QAbstractSocket::LowDelayOption, 1 );
 	QByteArray hello;
 	hello.append( char( Version ) );
@@ -215,8 +248,11 @@ void LabAudioClient::onReadyRead()
 			}
 			else
 			{
-				vWarning() << "LabAudio: hub rejected the connection";
+				vWarning() << "LabAudio: hub at" << currentHost() << "rejected the connection (outdated or wrong token)";
 				m_indicator->setStatus( tr( "The connection to the teacher was refused." ) );
+				// No automatic retry: the teacher has to start the audio mode again.
+				m_attemptActive = false;
+				m_connectTimer.stop();
 				m_socket->abort();
 				return;
 			}
@@ -239,12 +275,33 @@ void LabAudioClient::onReadyRead()
 
 void LabAudioClient::onDisconnected()
 {
-	stopAudio();
-	m_indicator->setStatus( tr( "Connection to the teacher lost. Reconnecting…" ) );
-	if( m_reconnectTimer.isActive() == false )
+	// errorOccurred, disconnected and the connect timeout can all report the same failed attempt.
+	if( m_attemptActive == false )
 	{
-		m_reconnectTimer.start();
+		return;
 	}
+	m_attemptActive = false;
+	m_connectTimer.stop();
+	stopAudio();
+
+	const auto host = currentHost();
+	const auto reason = m_failReason.isEmpty() ? m_socket->errorString() : m_failReason;
+	if( m_wasConnected && m_accepted )
+	{
+		// The route worked: retry the same address after a pause.
+		vWarning() << "LabAudio: connection to" << host << m_port << "lost:" << reason;
+		m_indicator->setStatus( tr( "Connection to the teacher lost. Reconnecting…" ) );
+		m_reconnectTimer.start( ReconnectIntervalMs );
+		return;
+	}
+
+	vWarning() << "LabAudio: cannot reach the teacher's audio hub at" << host << m_port << "-" << reason;
+	m_indicator->setStatus( tr( "Cannot reach the teacher's computer (%1, port %2): %3. Retrying…" )
+								.arg( host ).arg( m_port ).arg( reason ) );
+	// Try the teacher's next address quickly; pause after a full round.
+	++m_hostIndex;
+	const bool roundComplete = ( m_hostIndex % int( m_hosts.size() ) ) == 0;
+	m_reconnectTimer.start( roundComplete ? ReconnectIntervalMs : NextAddressDelayMs );
 }
 
 
