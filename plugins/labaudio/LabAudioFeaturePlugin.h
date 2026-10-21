@@ -39,12 +39,14 @@ class LabAudioFeaturePlugin : public QObject, FeatureProviderInterface, PluginIn
 	Q_PLUGIN_METADATA(IID "io.veyon.Veyon.Plugins.LabAudio")
 	Q_INTERFACES(PluginInterface FeatureProviderInterface)
 public:
+	// Arguments travel keyed by their numeric value: only append, never reorder,
+	// so teacher and student computers with different plugin builds stay compatible.
 	enum class Argument {
 		Token,
 		HubHost,
-		HubAddresses,
 		HubPort,
-		Roles
+		Roles,
+		HubAddresses
 	};
 	Q_ENUM(Argument)
 

@@ -388,14 +388,28 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonWorkerInterface& worker, 
 		switch( message.command<FeatureCommand>() )
 		{
 		case FeatureCommand::StartClient:
+		{
+			auto port = message.argument( Argument::HubPort ).toInt();
+			if( port <= 0 || port > 65535 )
+			{
+				vWarning() << "invalid lab audio hub port" << message.argument( Argument::HubPort )
+						   << "- teacher runs a different plugin version? Using" << DefaultHubPort;
+				port = DefaultHubPort;
+			}
+			auto roles = quint8( message.argument( Argument::Roles ).toInt() );
+			if( ( roles & ( ReceiveTeacher | SendMicrophone ) ) == 0 )
+			{
+				roles = ReceiveTeacher;
+			}
 			// A new mode replaces the previous connection (e.g. broadcast -> talk).
 			delete m_client;
 			m_client = new LabAudioClient( QStringList{ message.argument( Argument::HubHost ).toString() } +
 											   message.argument( Argument::HubAddresses ).toStringList(),
-										   message.argument( Argument::HubPort ).toInt(),
+										   port,
 										   message.argument( Argument::Token ).toByteArray(),
-										   quint8( message.argument( Argument::Roles ).toInt() ) );
+										   roles );
 			return true;
+		}
 		case FeatureCommand::StopClient:
 			delete m_client;
 			m_client = nullptr;
