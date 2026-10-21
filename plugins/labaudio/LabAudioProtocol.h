@@ -25,6 +25,8 @@
 #pragma once
 
 #include <QByteArray>
+#include <QCryptographicHash>
+#include <QString>
 #include <QtEndian>
 
 // Framing over one TCP connection per student:
@@ -67,6 +69,13 @@ inline QByteArray frame( FrameType type, const QByteArray& payload )
 	out.append( char( type ) );
 	out.append( payload );
 	return out;
+}
+
+// Short, non-secret fingerprint of a token, so teacher and student logs can be compared.
+inline QString tokenFingerprint( const QByteArray& token )
+{
+	return token.isEmpty() ? QStringLiteral( "empty" )
+						   : QString::fromLatin1( QCryptographicHash::hash( token, QCryptographicHash::Sha256 ).toHex().left( 8 ) );
 }
 
 inline QByteArray audioPayload( quint32 sequence, const QByteArray& opusPacket )

@@ -66,7 +66,7 @@ LabAudioHub::LabAudioHub( int port, const QByteArray& token, QObject* parent ) :
 	}
 	else
 	{
-		vInfo() << "LabAudio hub listening on port" << port;
+		vWarning() << "LabAudio hub listening on port" << port << "token" << tokenFingerprint( m_token );
 	}
 }
 
@@ -92,6 +92,10 @@ bool LabAudioHub::isListening() const
 
 void LabAudioHub::setToken( const QByteArray& token )
 {
+	if( token != m_token )
+	{
+		vWarning() << "LabAudio hub token changed to" << tokenFingerprint( token );
+	}
 	m_token = token;
 }
 
@@ -184,11 +188,17 @@ void LabAudioHub::handleHello( int id, const QByteArray& payload )
 {
 	auto& client = m_clients[id];
 	bool accepted = false;
-	if( payload.size() >= 4 && quint8( payload.at( 0 ) ) == Version )
+	QString reason = QStringLiteral( "malformed hello" );
+	if( payload.size() >= 4 && quint8( payload.at( 0 ) ) != Version )
+	{
+		reason = QStringLiteral( "protocol version %1, expected %2" ).arg( quint8( payload.at( 0 ) ) ).arg( Version );
+	}
+	else if( payload.size() >= 4 )
 	{
 		const auto roles = quint8( payload.at( 1 ) );
 		const auto tokenLength = qFromBigEndian<quint16>( payload.constData() + 2 );
 		const auto token = payload.mid( 4, tokenLength );
+		reason = QStringLiteral( "token %1, expected %2" ).arg( tokenFingerprint( token ), tokenFingerprint( m_token ) );
 		if( payload.size() == 4 + tokenLength && constantTimeEquals( token, m_token ) )
 		{
 			client.roles = roles & ( ReceiveTeacher | SendMicrophone );
@@ -200,7 +210,7 @@ void LabAudioHub::handleHello( int id, const QByteArray& payload )
 	client.socket->write( frame( FrameType::HelloAck, QByteArray( 1, accepted ? 1 : 0 ) ) );
 	if( accepted == false )
 	{
-		vWarning() << "LabAudio client rejected: invalid token or version";
+		vWarning() << "LabAudio client" << client.socket->peerAddress().toString() << "rejected:" << reason;
 		client.socket->flush();
 		dropClient( id );
 		return;

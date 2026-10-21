@@ -181,6 +181,8 @@ bool LabAudioFeaturePlugin::controlFeature( Feature::Uid featureUid, Operation o
 	{
 		if( operation == Operation::Start )
 		{
+			vWarning() << "LabAudio: starting clients on" << computerControlInterfaces.size() << "computers, hub port"
+					   << hubPort() << "addresses" << localAddresses() << "token" << tokenFingerprint( m_token );
 			sendFeatureMessage( FeatureMessage{ m_clientFeature.uid(), FeatureCommand::StartClient }
 									.addArgument( Argument::Token, arguments.value( argToString(Argument::Token), m_token ) )
 									.addArgument( Argument::HubHost, arguments.value( argToString(Argument::HubHost) ) )
@@ -323,6 +325,9 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonServerInterface& server, 
 			return true;
 		}
 
+		vWarning() << "LabAudio StartClient from master, argument keys" << message.arguments().keys()
+				   << "token" << tokenFingerprint( message.argument( Argument::Token ).toByteArray() );
+
 		if( message.argument( Argument::HubHost ).toString().isEmpty() )
 		{
 			// The hub runs on the computer of the Veyon Master that sent this command.
@@ -366,7 +371,8 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonWorkerInterface& worker, 
 		case FeatureCommand::StartHub:
 			if( m_hub == nullptr )
 			{
-				m_hub = new LabAudioHub( message.argument( Argument::HubPort ).toInt(),
+				vWarning() << "LabAudio StartHub: argument keys" << message.arguments().keys();
+			m_hub = new LabAudioHub( message.argument( Argument::HubPort ).toInt(),
 										 message.argument( Argument::Token ).toByteArray() );
 			}
 			else
@@ -401,6 +407,11 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonWorkerInterface& worker, 
 			{
 				roles = ReceiveTeacher;
 			}
+			vWarning() << "LabAudio StartClient: argument keys" << message.arguments().keys()
+					   << "host" << message.argument( Argument::HubHost ).toString()
+					   << "addresses" << message.argument( Argument::HubAddresses ).toStringList()
+					   << "port" << port << "roles" << roles
+					   << "token" << tokenFingerprint( message.argument( Argument::Token ).toByteArray() );
 			// A new mode replaces the previous connection (e.g. broadcast -> talk).
 			delete m_client;
 			m_client = new LabAudioClient( QStringList{ message.argument( Argument::HubHost ).toString() } +
