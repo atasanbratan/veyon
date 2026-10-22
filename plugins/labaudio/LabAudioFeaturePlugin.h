@@ -31,10 +31,13 @@
 #include "CryptoCore.h"
 #include "Feature.h"
 #include "FeatureProviderInterface.h"
+#include "LabAudioCallBoard.h"
+#include "LabAudioCalls.h"
 #include "LabAudioGroupWork.h"
 
 class LabAudioClient;
 class LabAudioHub;
+class VeyonWorkerInterface;
 
 class LabAudioFeaturePlugin : public QObject, FeatureProviderInterface, PluginInterface
 {
@@ -55,7 +58,10 @@ public:
 		TeacherTalks,
 		GroupMembers,
 		StudentName,
-		TeacherMuted
+		TeacherMuted,
+		Calling,
+		CallsAllowed,
+		CallTime	// LongLong: milliseconds since epoch (UTC)
 	};
 	Q_ENUM(Argument)
 
@@ -112,6 +118,13 @@ public:
 							   const MessageContext& messageContext,
 							   const FeatureMessage& message ) override;
 
+	bool handleFeatureMessage( ComputerControlInterface::Pointer computerControlInterface,
+							   const FeatureMessage& message ) override;
+
+	bool handleFeatureMessageFromWorker( VeyonServerInterface& server, const FeatureMessage& message ) override;
+
+	void sendAsyncFeatureMessages( VeyonServerInterface& server, const MessageContext& messageContext ) override;
+
 	bool handleFeatureMessage( VeyonWorkerInterface& worker, const FeatureMessage& message ) override;
 
 	bool isFeatureActive( VeyonServerInterface& server, Feature::Uid featureUid ) const override;
@@ -119,13 +132,19 @@ public:
 	// Default TCP port of the teacher's audio hub (plus the Veyon session id on multi-session hosts).
 	static constexpr int DefaultHubPort = 11500;
 	static constexpr int HubKeepAliveIntervalMs = 5000;
+	static constexpr int CallTrayRetryMs = 15000;
+	static constexpr int CallTrayCheckMs = 3000;
 
 private:
 	enum class FeatureCommand {
 		StartHub,
 		StopHub,
 		StartClient,
-		StopClient
+		StopClient,
+		SetCalling,		// worker -> server
+		CallState,		// server -> worker, server -> Master
+		AnswerCall,		// Master -> server
+		SetCallsAllowed	// Master -> server
 	};
 
 	struct Group
@@ -154,6 +173,16 @@ private:
 	// Name plus computer, e.g. "Anna Petrova (PC-07)", for the teacher's list of calls.
 	static QString studentLabel( const ComputerControlInterface::Pointer& computerControlInterface );
 
+	// calling the teacher
+	FeatureMessage callStateMessage( Feature::Uid featureUid ) const;
+	void pushCallState( VeyonServerInterface& server );
+	void ensureCallTray( VeyonServerInterface& server );
+	void sendCalling( Feature::Uid workerFeature, bool calling );
+	LabAudioCallsWindow* callsWindow();
+	void updateCallsWindow();
+	void answerCall( int id );
+	void setCallsAllowed( bool allowed );
+
 	const Feature m_labAudioFeature;
 	const Feature m_broadcastFeature;
 	const Feature m_talkFeature;
@@ -161,6 +190,8 @@ private:
 	const Feature m_groupWorkFeature;
 	const Feature m_hubFeature;
 	const Feature m_clientFeature;
+	const Feature m_callsFeature;
+	const Feature m_callTrayFeature;
 	const FeatureList m_features;
 
 	QByteArray m_token;
@@ -179,6 +210,27 @@ private:
 	QPointer<LabAudioTeacherPanel> m_teacherPanel;
 	bool m_teacherMuted{false};
 
+	// calling the teacher: Veyon Server
+	LabAudioCallBoard m_callBoard;
+	QAtomicInteger<qint64> m_lastCallTrayStart{0};
+	QAtomicInteger<qint64> m_lastCallTrayCheck{0};
+
+	// calling the teacher: Veyon Master
+	struct MasterCall
+	{
+		ComputerControlInterface::Pointer computer;
+		QDateTime since;
+	};
+	QHash<int, MasterCall> m_calls;
+	QHash<QString, int> m_callIds;	// computer uid -> call id
+	int m_nextCallId{1};
+	bool m_callsAllowed{true};
+	QPointer<LabAudioCallsWindow> m_callsWindow;
+	VeyonMasterInterface* m_master{nullptr};
+
+	// worker processes
+	VeyonWorkerInterface* m_worker{nullptr};
+	LabAudioCallTray* m_callTray{nullptr};
 	LabAudioHub* m_hub{nullptr};
 	LabAudioClient* m_client{nullptr};
 };

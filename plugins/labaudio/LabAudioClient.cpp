@@ -150,11 +150,12 @@ int LabAudioIndicator::savedVolume()
 
 
 
-void LabAudioIndicator::setCallAnswered()
+void LabAudioIndicator::setCallState( bool calling, bool allowed )
 {
-	// The teacher pressed "Done": reset without sending the change back.
+	// State from the Veyon Server (also after the teacher pressed "Done"): no change is sent back.
 	const QSignalBlocker blocker( m_call );
-	m_call->setChecked( false );
+	m_call->setChecked( calling && allowed );
+	m_call->setEnabled( allowed );
 	updateCallButton();
 }
 
@@ -162,7 +163,14 @@ void LabAudioIndicator::setCallAnswered()
 
 void LabAudioIndicator::updateCallButton()
 {
-	m_call->setText( m_call->isChecked() ? tr( "✋ Calling the teacher… (cancel)" ) : tr( "✋ Call the teacher" ) );
+	if( m_call->isEnabled() == false )
+	{
+		m_call->setText( tr( "✋ Calling is turned off" ) );
+	}
+	else
+	{
+		m_call->setText( m_call->isChecked() ? tr( "✋ Calling the teacher… (cancel)" ) : tr( "✋ Call the teacher" ) );
+	}
 	placeOnScreen();
 }
 
@@ -240,19 +248,16 @@ void LabAudioIndicator::closeEvent( QCloseEvent* event )
 
 
 LabAudioClient::LabAudioClient( const QStringList& hosts, int port, const QByteArray& token, quint8 roles,
-								const QStringList& groupMembers, const QString& studentName, QObject* parent ) :
+								const QStringList& groupMembers, QObject* parent ) :
 	QObject( parent ),
 	m_hosts( hosts ),
 	m_port( port ),
 	m_token( token ),
 	m_roles( roles ),
-	m_studentName( studentName ),
 	m_socket( new QTcpSocket( this ) ),
 	m_indicator( new LabAudioIndicator( roles, groupMembers ) )
 {
 	connect( this, &LabAudioClient::teacherStatusChanged, m_indicator, &LabAudioIndicator::setTeacherStatus );
-	connect( this, &LabAudioClient::callAnswered, m_indicator, &LabAudioIndicator::setCallAnswered );
-	connect( m_indicator, &LabAudioIndicator::callToggled, this, &LabAudioClient::setCalling );
 	connect( m_indicator, &LabAudioIndicator::volumeChanged, this, [this]( int percent ) {
 		if( m_playback )
 		{
@@ -310,22 +315,6 @@ LabAudioClient::~LabAudioClient()
 	m_socket->abort();
 	stopAudio();
 	delete m_indicator;
-}
-
-
-
-void LabAudioClient::setCalling( bool calling )
-{
-	m_calling = calling;
-	if( m_accepted )
-	{
-		QByteArray payload( 1, calling ? 1 : 0 );
-		if( calling )
-		{
-			payload.append( m_studentName.toUtf8().left( MaxNameBytes ) );
-		}
-		send( FrameType::CallTeacher, payload );
-	}
 }
 
 
@@ -398,11 +387,6 @@ void LabAudioClient::onReadyRead()
 				// The first encrypted frame proves to the hub that this client knows the token.
 				send( FrameType::Auth, QByteArray( 1, char( m_roles ) ) );
 				startAudio();
-				if( m_calling )
-				{
-					// A call survives a reconnect.
-					setCalling( true );
-				}
 			}
 			else
 			{
@@ -452,11 +436,6 @@ void LabAudioClient::onReadyRead()
 		else if( type == FrameType::Status && payload.size() == 1 )
 		{
 			Q_EMIT teacherStatusChanged( quint8( payload.at( 0 ) ) );
-		}
-		else if( type == FrameType::CallTeacher && payload.size() == 1 && payload.at( 0 ) == 0 )
-		{
-			m_calling = false;
-			Q_EMIT callAnswered();
 		}
 	}
 	if( error )

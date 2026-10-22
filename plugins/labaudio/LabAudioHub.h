@@ -24,11 +24,9 @@
 
 #pragma once
 
-#include <QDateTime>
 #include <QHash>
 #include <QObject>
 #include <QPointer>
-#include <QWidget>
 
 #include "LabAudioCrypto.h"
 #include "LabAudioProtocol.h"
@@ -36,35 +34,8 @@
 class QTcpServer;
 class QTcpSocket;
 class QTimer;
-class QVBoxLayout;
 class LabAudioCapture;
 class LabAudioPlayback;
-
-// A student who pressed "Call teacher".
-struct LabAudioCall
-{
-	int clientId;
-	QString name;
-	int group;
-	QDateTime time;
-};
-
-// Window on the teacher's screen listing students who are calling; "Done" answers a call.
-class LabAudioCallsWindow : public QWidget
-{
-	Q_OBJECT
-public:
-	LabAudioCallsWindow();
-
-	void setCalls( const QList<LabAudioCall>& calls );
-
-Q_SIGNALS:
-	void answered( int clientId );
-
-private:
-	QVBoxLayout* m_rows;
-	int m_shownCalls{0};
-};
 
 // Accepts student connections authenticated with the session token.
 // Clients authenticated with the class token form group 0: they receive the teacher's microphone
@@ -86,14 +57,6 @@ public:
 	void setFocus( int focusGroup, bool teacherTalks );
 	// Mutes the teacher's microphone (silence keeps flowing so students' buffers stay steady).
 	void setTeacherMuted( bool muted );
-	// Current calls, oldest first; answering resets the student's button.
-	QList<LabAudioCall> calls() const;
-	void answerCall( int clientId );
-	// Show calls in a window on the teacher's screen (off in tests without a display).
-	void setCallsWindowEnabled( bool enabled )
-	{
-		m_callsWindowEnabled = enabled;
-	}
 
 	static constexpr int MaxClients = 100;
 	static constexpr qint64 MaxQueuedBytes = 64 * 1024;	// drop audio to a client that falls behind
@@ -104,7 +67,6 @@ Q_SIGNALS:
 	void teacherPacketSent( int receivers );
 	void studentPacketReceived( int clientId );
 	void peerPacketForwarded( int sourceId, int receivers );
-	void callsChanged( int count );
 
 private:
 	struct Client
@@ -116,8 +78,6 @@ private:
 		QTimer* helloTimer{nullptr};
 		QByteArray token;
 		int group{ClassGroup};
-		QString callName;
-		QDateTime callTime;	// valid while the student is calling
 		LabAudioSession session;	// ready after the hello; authenticated after the Auth frame
 	};
 
@@ -133,8 +93,6 @@ private:
 	void sendStatus( int id );
 	bool hearsTeacher( const Client& client ) const;
 	bool teacherHears( const Client& client ) const;
-	void handleCall( int id, const QByteArray& payload );
-	void updateCalls();
 
 	QTcpServer* m_server{nullptr};
 	QByteArray m_token;
@@ -142,8 +100,6 @@ private:
 	int m_focusGroup{NoGroup};
 	bool m_teacherTalks{false};
 	bool m_teacherMuted{false};
-	bool m_callsWindowEnabled{true};
-	QPointer<LabAudioCallsWindow> m_callsWindow;
 	QHash<int, Client> m_clients;
 	int m_nextId{1};
 	quint32 m_sequence{0};

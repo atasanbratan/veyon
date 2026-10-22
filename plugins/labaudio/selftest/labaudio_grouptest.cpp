@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "../LabAudioCalls.h"
 #include "../LabAudioClient.h"
 #include "../LabAudioGroupWork.h"
 #include "../LabAudioHub.h"
@@ -93,10 +94,6 @@ public:
 				{
 					++teacherAudio;
 				}
-				else if( type == FrameType::CallTeacher && payload == QByteArray( 1, char( 0 ) ) )
-				{
-					callAnswered = true;
-				}
 			}
 		} );
 		connect( &socket, &QTcpSocket::disconnected, this, [this]() { disconnected = true; } );
@@ -106,13 +103,6 @@ public:
 	void sendAudio( quint32 sequence )
 	{
 		socket.write( session.seal( FrameType::Audio, audioPayload( sequence, QByteArray( 60, char( 0x55 ) ) ) ) );
-	}
-
-	void call( bool calling, const QString& name )
-	{
-		QByteArray payload( 1, calling ? 1 : 0 );
-		payload.append( name.toUtf8() );
-		socket.write( session.seal( FrameType::CallTeacher, payload ) );
 	}
 
 	QTcpSocket socket;
@@ -126,7 +116,6 @@ public:
 	QList<int> peerSources;
 	QList<quint8> status;
 	int teacherAudio{0};
-	bool callAnswered{false};
 };
 
 int main( int argc, char** argv )
@@ -173,6 +162,11 @@ int main( int argc, char** argv )
 		wait( 200 );
 		group.grab().save( dir + QStringLiteral( "/student-group.png" ) );
 
+		LabAudioCallsWindow noCalls;
+		noCalls.present();
+		wait( 200 );
+		noCalls.grab().save( dir + QStringLiteral( "/teacher-calls-empty.png" ) );
+
 		LabAudioCallsWindow calls;
 		calls.setCalls( { { 1, QStringLiteral( "Emre Yilmaz (PC-05)" ), 0, QDateTime::currentDateTime().addSecs( -90 ) },
 						  { 2, QStringLiteral( "Carla Diaz (PC-03)" ), 2, QDateTime::currentDateTime() } } );
@@ -198,7 +192,6 @@ int main( int argc, char** argv )
 	const QByteArray group1 = QByteArrayLiteral( "group-one-token-0123456789" );
 	const QByteArray group2 = QByteArrayLiteral( "group-two-token-0123456789" );
 	LabAudioHub hub( port, classToken );
-	hub.setCallsWindowEnabled( false );
 	hub.setGroups( { { group1, 1 }, { group2, 2 } } );
 
 	const quint8 groupRoles = SendMicrophone | ReceivePeers | ReceiveTeacher;
@@ -256,25 +249,6 @@ int main( int argc, char** argv )
 	CHECK( carla.status.value( carla.status.size() - 1 ) == ( TeacherListening | TeacherTalking ),
 		   "group 2 sees that the teacher joined" );
 
-	// Calling the teacher: two calls listed oldest first, "Done" resets the student's button,
-	// a cancelled call disappears.
-	classStudent.call( true, QStringLiteral( "Emre Yilmaz (PC-05)" ) );
-	wait( 100 );
-	carla.call( true, QStringLiteral( "Carla Diaz (PC-03)" ) );
-	wait( 300 );
-	auto calls = hub.calls();
-	CHECK( calls.size() == 2 && calls[0].name == QStringLiteral( "Emre Yilmaz (PC-05)" ) && calls[0].group == 0 &&
-		   calls[1].name == QStringLiteral( "Carla Diaz (PC-03)" ) && calls[1].group == 2,
-		   "teacher sees both calls with name and group, oldest first" );
-	hub.answerCall( calls[0].clientId );
-	wait( 300 );
-	CHECK( classStudent.callAnswered && hub.calls().size() == 1, "\"Done\" answers the call and resets the student's button" );
-	carla.call( false, {} );
-	wait( 300 );
-	CHECK( hub.calls().isEmpty() && carla.callAnswered == false, "a cancelled call disappears" );
-	dan.call( true, QStringLiteral( "Dan Ivanov" ) );
-	wait( 300 );
-
 	// Regrouping: new tokens, all old group members are disconnected, the class student stays.
 	hub.setFocus( LabAudioHub::NoGroup, false );
 	hub.setGroups( { { QByteArrayLiteral( "new-group-token-0123456789" ), 1 } } );
@@ -282,7 +256,6 @@ int main( int argc, char** argv )
 	CHECK( anna.disconnected && ben.disconnected && carla.disconnected && dan.disconnected,
 		   "regrouping disconnects the old groups" );
 	CHECK( classStudent.disconnected == false, "class student stays connected" );
-	CHECK( hub.calls().isEmpty(), "a call ends when the student disconnects" );
 
 	std::printf( failures ? "\n%d FAILED\n" : "\nALL PASSED\n", failures );
 	return failures ? 1 : 0;

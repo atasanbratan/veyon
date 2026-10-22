@@ -22,18 +22,10 @@
  *
  */
 
-#include <QApplication>
-#include <QHBoxLayout>
-#include <QLabel>
-#include <QPushButton>
-#include <QScreen>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTimer>
-#include <QVBoxLayout>
 #include <QtEndian>
-
-#include <algorithm>
 
 #include "LabAudioEngine.h"
 #include "LabAudioHub.h"
@@ -62,79 +54,6 @@ bool constantTimeEquals( const QByteArray& a, const QByteArray& b )
 
 
 
-LabAudioCallsWindow::LabAudioCallsWindow() :
-	QWidget( nullptr, Qt::Tool | Qt::WindowStaysOnTopHint ),
-	m_rows( new QVBoxLayout )
-{
-	setWindowTitle( tr( "Students calling" ) );
-	setMinimumWidth( 360 );
-	auto layout = new QVBoxLayout( this );
-	layout->addLayout( m_rows );
-}
-
-
-
-void LabAudioCallsWindow::setCalls( const QList<LabAudioCall>& calls )
-{
-	while( auto item = m_rows->takeAt( 0 ) )
-	{
-		if( item->widget() )
-		{
-			item->widget()->deleteLater();
-		}
-		delete item;
-	}
-
-	for( const auto& call : calls )
-	{
-		auto row = new QWidget( this );
-		auto rowLayout = new QHBoxLayout( row );
-		rowLayout->setContentsMargins( 0, 0, 0, 0 );
-		auto text = call.name.toHtmlEscaped();
-		if( call.group > 0 )
-		{
-			text += tr( " · group %1" ).arg( call.group );
-		}
-		auto label = new QLabel( QStringLiteral( "✋ <b>%1</b> &nbsp; %2" )
-									 .arg( text, call.time.toString( QStringLiteral( "HH:mm" ) ) ), row );
-		auto done = new QPushButton( tr( "Done" ), row );
-		done->setToolTip( tr( "Answer the call: the student's button is reset." ) );
-		const auto clientId = call.clientId;
-		connect( done, &QPushButton::clicked, this, [this, clientId]() { Q_EMIT answered( clientId ); } );
-		rowLayout->addWidget( label, 1 );
-		rowLayout->addWidget( done );
-		m_rows->addWidget( row );
-	}
-
-	if( calls.isEmpty() )
-	{
-		hide();
-	}
-	else
-	{
-		adjustSize();
-		if( isVisible() == false )
-		{
-			if( const auto screen = QGuiApplication::primaryScreen() )
-			{
-				const auto area = screen->availableGeometry();
-				move( area.right() - width() - 20, area.top() + 60 );
-			}
-			show();
-		}
-		if( calls.size() > m_shownCalls )
-		{
-			// A new call: draw attention without stealing the teacher's keyboard focus.
-			QApplication::beep();
-			QApplication::alert( this );
-			raise();
-		}
-	}
-	m_shownCalls = int( calls.size() );
-}
-
-
-
 LabAudioHub::LabAudioHub( int port, const QByteArray& token, QObject* parent ) :
 	QObject( parent ),
 	m_server( new QTcpServer( this ) ),
@@ -155,13 +74,11 @@ LabAudioHub::LabAudioHub( int port, const QByteArray& token, QObject* parent ) :
 
 LabAudioHub::~LabAudioHub()
 {
-	m_callsWindowEnabled = false;
 	const auto ids = m_clients.keys();
 	for( const auto id : ids )
 	{
 		dropClient( id );
 	}
-	delete m_callsWindow;
 }
 
 
@@ -173,76 +90,6 @@ void LabAudioHub::setTeacherMuted( bool muted )
 	{
 		m_capture->setMuted( muted );
 	}
-}
-
-
-
-QList<LabAudioCall> LabAudioHub::calls() const
-{
-	QList<LabAudioCall> calls;
-	for( auto it = m_clients.cbegin(); it != m_clients.cend(); ++it )
-	{
-		if( it->authenticated && it->callTime.isValid() )
-		{
-			calls.append( { it.key(), it->callName, it->group, it->callTime } );
-		}
-	}
-	std::sort( calls.begin(), calls.end(), []( const LabAudioCall& a, const LabAudioCall& b ) { return a.time < b.time; } );
-	return calls;
-}
-
-
-
-void LabAudioHub::answerCall( int clientId )
-{
-	auto it = m_clients.find( clientId );
-	if( it == m_clients.end() || it->callTime.isValid() == false )
-	{
-		return;
-	}
-	it->callTime = {};
-	sendToClient( it.value(), FrameType::CallTeacher, QByteArray( 1, 0 ) );
-	updateCalls();
-}
-
-
-
-void LabAudioHub::handleCall( int id, const QByteArray& payload )
-{
-	auto& client = m_clients[id];
-	const bool calling = payload.at( 0 ) != 0;
-	if( calling && client.callTime.isValid() == false )
-	{
-		client.callName = QString::fromUtf8( payload.mid( 1, MaxNameBytes ) ).trimmed();
-		if( client.callName.isEmpty() )
-		{
-			client.callName = client.socket ? client.socket->peerAddress().toString() : tr( "A student" );
-		}
-		client.callTime = QDateTime::currentDateTime();
-		vInfo() << "LabAudio: student" << client.callName << "is calling the teacher";
-	}
-	else if( calling == false )
-	{
-		client.callTime = {};
-	}
-	updateCalls();
-}
-
-
-
-void LabAudioHub::updateCalls()
-{
-	const auto current = calls();
-	if( m_callsWindowEnabled && ( current.isEmpty() == false || m_callsWindow ) )
-	{
-		if( m_callsWindow.isNull() )
-		{
-			m_callsWindow = new LabAudioCallsWindow;
-			connect( m_callsWindow, &LabAudioCallsWindow::answered, this, &LabAudioHub::answerCall );
-		}
-		m_callsWindow->setCalls( current );
-	}
-	Q_EMIT callsChanged( int( current.size() ) );
 }
 
 
@@ -469,10 +316,6 @@ void LabAudioHub::readClient( int id )
 				forwardStudentAudio( id, payload );
 			}
 		}
-		else if( type == FrameType::CallTeacher && payload.size() >= 1 && payload.size() <= 1 + MaxNameBytes )
-		{
-			handleCall( id, payload );
-		}
 		else if( type == FrameType::Bye )
 		{
 			dropClient( id );
@@ -572,10 +415,6 @@ void LabAudioHub::dropClient( int id )
 	}
 	auto client = it.value();
 	m_clients.erase( it );
-	if( client.callTime.isValid() )
-	{
-		updateCalls();
-	}
 	if( client.helloTimer )
 	{
 		client.helloTimer->deleteLater();

@@ -5,5 +5,7 @@
         <file>talk.png</file>
         <file>listen.png</file>
         <file>group.png</file>
+        <file>hand.png</file>
+        <file>hand-calling.png</file>
     </qresource>
 </RCC>

@@ -18,6 +18,7 @@
 
 #include <opus/opus.h>
 
+#include "../LabAudioCallBoard.h"
 #include "../LabAudioCrypto.h"
 #include "../LabAudioEngine.h"
 #include "../LabAudioProtocol.h"
@@ -309,6 +310,28 @@ static void testCrypto()
 
 
 
+static void testCallBoard()
+{
+	LabAudioCallBoard board;
+	const auto v0 = board.version();
+	CHECK( board.state().calling == false && board.state().allowed, "nobody is calling at the start, calls allowed" );
+
+	CHECK( board.setCalling( true ) && board.state().calling && board.state().since.isValid() && board.version() > v0,
+		   "a call is stored with its time and announced (new version)" );
+	const auto v1 = board.version();
+	CHECK( board.setCalling( true ) == false && board.version() == v1,
+		   "pressing again from the other button (tray / notice) changes nothing" );
+	CHECK( board.answer() && board.state().calling == false && board.version() > v1, "teacher's \"Done\" ends the call" );
+
+	board.setCalling( true );
+	CHECK( board.setAllowed( false ) && board.state().calling == false, "turning calls off also ends a running call" );
+	CHECK( board.setCalling( true ) == false && board.state().calling == false, "no call while calls are turned off" );
+	board.setAllowed( true );
+	CHECK( board.setCalling( true ) && board.state().calling, "calls work again after turning them on" );
+}
+
+
+
 int main( int argc, char** argv )
 {
 	QCoreApplication app( argc, argv );
@@ -321,6 +344,7 @@ int main( int argc, char** argv )
 	testFraming();
 	testMixer();
 	testCrypto();
+	testCallBoard();
 	std::printf( failures ? "\n%d FAILED\n" : "\nALL PASSED\n", failures );
 	return failures ? 1 : 0;
 }

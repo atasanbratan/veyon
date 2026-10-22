@@ -67,3 +67,20 @@ Draw-Person $g $blue 30 34 0.9
 Draw-Person $g $blue 98 34 0.9
 Draw-Person $g $orange 64 22 1.1
 $c[0].Save("$OutDir\group.png"); $g.Dispose(); $c[0].Dispose()
+
+# Call the teacher: a raised hand on a round badge (blue = ready, orange = calling).
+function Draw-Hand($g, $badge) {
+    $g.FillEllipse((New-Object System.Drawing.SolidBrush $badge), 4, 4, 120, 120)
+    $white = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
+    $g.FillRectangle($white, 38, 58, 52, 44)
+    $g.FillEllipse($white, 38, 82, 52, 30)
+    foreach ($f in @(@(38, 30), @(51, 22), @(64, 24), @(77, 32))) {
+        $g.FillRectangle($white, $f[0], $f[1] + 6, 12, 50 - $f[1])
+        $g.FillEllipse($white, $f[0], $f[1], 12, 12)
+    }
+    $thumb = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), 13
+    $thumb.StartCap = "Round"; $thumb.EndCap = "Round"
+    $g.DrawLine($thumb, 44, 84, 27, 60)
+}
+$c = New-Canvas; Draw-Hand $c[1] $blue; $c[0].Save("$OutDir\hand.png"); $c[1].Dispose(); $c[0].Dispose()
+$c = New-Canvas; Draw-Hand $c[1] $orange; $c[0].Save("$OutDir\hand-calling.png"); $c[1].Dispose(); $c[0].Dispose()

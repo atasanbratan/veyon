@@ -49,7 +49,8 @@ public:
 	void setStatus( const QString& status );
 	void setLevel( float level );
 	void setTeacherStatus( quint8 statusFlags );
-	void setCallAnswered();
+	// "Call the teacher" button: state kept by the Veyon Server.
+	void setCallState( bool calling, bool allowed );
 	// Last volume chosen by this student (percent, 100 = unchanged).
 	static int savedVolume();
 
@@ -79,15 +80,13 @@ class LabAudioClient : public QObject
 public:
 	// hosts: addresses of the teacher's computer, tried in order (the first one is the preferred route).
 	// groupMembers: names of the other students in the group (group work only).
-	// studentName: shown to the teacher when this student calls.
 	LabAudioClient( const QStringList& hosts, int port, const QByteArray& token, quint8 roles,
-					const QStringList& groupMembers = {}, const QString& studentName = {}, QObject* parent = nullptr );
+					const QStringList& groupMembers = {}, QObject* parent = nullptr );
 
 	LabAudioIndicator* indicator() const
 	{
 		return m_indicator;
 	}
-	void setCalling( bool calling );
 	~LabAudioClient() override;
 
 	static constexpr int ReconnectIntervalMs = 2000;
@@ -98,7 +97,6 @@ Q_SIGNALS:
 	void audioReceived( int bytes );
 	void peerAudioReceived( int sourceId );
 	void teacherStatusChanged( quint8 statusFlags );
-	void callAnswered();
 
 private:
 	void connectToHub();
@@ -120,8 +118,6 @@ private:
 	int m_port;
 	QByteArray m_token;
 	quint8 m_roles;
-	QString m_studentName;
-	bool m_calling{false};
 	QTcpSocket* m_socket;
 	LabAudioProtocol::FrameReader m_reader;
 	LabAudioSession m_session;

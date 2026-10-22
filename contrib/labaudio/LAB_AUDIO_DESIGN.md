@@ -17,9 +17,13 @@ Starting another mode on a computer replaces its previous mode. "Stop" on the gr
 
 ### Classroom controls
 
-- **Call the teacher**: a button on every student notice. The hub lists calls (name and computer from Veyon Master,
-  group, time) in a "Students calling" window on the teacher's screen with a beep; **Done** resets the student's
-  button. A call survives a reconnect and ends when the student disconnects (`CallTeacher` frame).
+- **Call the teacher at any time**: a tray icon (raised hand) on every student PC, started by the Veyon Server as
+  soon as a Veyon Master is connected and a user is logged in; the ✋ button on the audio notice does the same.
+  The state lives in the student's Veyon Server (`LabAudioCallBoard`), travels to every connected Master through
+  Veyon's own connection (`sendAsyncFeatureMessages`, no extra port) and back to the tray and the notice. A call
+  waits until a Master connects. Master shows "Students calling" (name, computer, group, time, beep) with **Done**,
+  **All done** and **Students may call the teacher** (off e.g. during a test; remembered per teacher). Also opened
+  from the toolbar: Lab audio → Student calls.
 - **Student volume**: slider on the notice, 0–200 %, applied in the mixer, remembered per Windows user.
 - **Teacher microphone**: the teacher panel (Speak / Talk) and the group panel have **Microphone on/off** and
   **Push to talk** (hold the button or Space while the panel is active). Muting sends silent frames so the
@@ -95,10 +99,6 @@ Audio (u32 sequence + Opus packet), Bye, Status (u8 teacher flags), PeerAudio (u
 
 ## Wait list
 
-- **Call the teacher at any time** (requested 2026-10-22): tray icon on student PCs, started at login, so students can
-  call without an active audio mode. The call travels through Veyon's own Server → Master connection (no extra port),
-  shows in the "Students calling" window, is kept until Veyon Master is opened, and the teacher has an
-  "Allow calls" switch (e.g. off during tests) and "Clear all". The ✋ button on the audio notice uses the same path.
 - Recording (lesson, oral exam answers).
 - Configuration page (port is fixed at 11500 + session id, audio quality).
 - Translations.
