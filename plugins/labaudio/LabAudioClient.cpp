@@ -301,9 +301,9 @@ LabAudioClient::~LabAudioClient()
 {
 	m_reconnectTimer.stop();
 	m_connectTimer.stop();
-	if( m_socket->state() == QAbstractSocket::ConnectedState )
+	if( m_accepted && m_socket->state() == QAbstractSocket::ConnectedState )
 	{
-		m_socket->write( frame( FrameType::Bye, {} ) );
+		send( FrameType::Bye, {} );
 		m_socket->flush();
 	}
 	m_socket->disconnect( this );
@@ -317,14 +317,14 @@ LabAudioClient::~LabAudioClient()
 void LabAudioClient::setCalling( bool calling )
 {
 	m_calling = calling;
-	if( m_accepted && m_socket->state() == QAbstractSocket::ConnectedState )
+	if( m_accepted )
 	{
 		QByteArray payload( 1, calling ? 1 : 0 );
 		if( calling )
 		{
 			payload.append( m_studentName.toUtf8().left( MaxNameBytes ) );
 		}
-		m_socket->write( frame( FrameType::CallTeacher, payload ) );
+		send( FrameType::CallTeacher, payload );
 	}
 }
 
@@ -360,14 +360,23 @@ void LabAudioClient::onConnected()
 	m_connectTimer.stop();
 	m_wasConnected = true;
 	m_socket->setSocketOption( QAbstractSocket::LowDelayOption, 1 );
-	QByteArray hello;
-	hello.append( char( Version ) );
-	hello.append( char( m_roles ) );
-	char length[2];
-	qToBigEndian( quint16( m_token.size() ), length );
-	hello.append( length, 2 );
-	hello.append( m_token );
+	// Names the token only by its key id; the token itself never leaves this computer.
+	m_session = {};
+	m_clientNonce = LabAudioSession::randomNonce();
+	QByteArray hello( 1, char( Version ) );
+	hello += LabAudioSession::keyId( m_token );
+	hello += m_clientNonce;
 	m_socket->write( frame( FrameType::Hello, hello ) );
+}
+
+
+
+void LabAudioClient::send( FrameType type, const QByteArray& payload )
+{
+	if( m_session.isReady() && m_socket->state() == QAbstractSocket::ConnectedState )
+	{
+		m_socket->write( m_session.seal( type, payload ) );
+	}
 }
 
 
@@ -382,9 +391,12 @@ void LabAudioClient::onReadyRead()
 	{
 		if( m_accepted == false )
 		{
-			if( type == FrameType::HelloAck && payload.size() == 1 && payload.at( 0 ) == 1 )
+			if( type == FrameType::HelloAck && payload.size() == 1 + LabAudioSession::NonceSize && payload.at( 0 ) == 1 &&
+				m_session.init( m_token, m_clientNonce, payload.mid( 1 ), LabAudioSession::Role::Client ) )
 			{
 				m_accepted = true;
+				// The first encrypted frame proves to the hub that this client knows the token.
+				send( FrameType::Auth, QByteArray( 1, char( m_roles ) ) );
 				startAudio();
 				if( m_calling )
 				{
@@ -394,8 +406,10 @@ void LabAudioClient::onReadyRead()
 			}
 			else
 			{
-				vWarning() << "LabAudio: hub at" << currentHost() << "rejected the connection (outdated or wrong token)";
-				m_indicator->setStatus( tr( "The connection to the teacher was refused." ) );
+				vWarning() << "LabAudio: hub at" << currentHost() << "rejected the connection (outdated mode, wrong token "
+							  "or different plugin version)";
+				m_indicator->setStatus( tr( "The connection to the teacher was refused. Is the same Veyon version "
+											"installed on this computer and the teacher's computer?" ) );
 				// No automatic retry: the teacher has to start the audio mode again.
 				m_attemptActive = false;
 				m_connectTimer.stop();
@@ -404,6 +418,20 @@ void LabAudioClient::onReadyRead()
 			}
 			continue;
 		}
+
+		FrameType innerType;
+		QByteArray inner;
+		if( type != FrameType::Encrypted || m_session.open( payload, innerType, inner ) == false )
+		{
+			// Only the real teacher computer (which knows the token) can produce authentic frames.
+			vWarning() << "LabAudio: frame from" << currentHost() << "is not authentic - reconnecting";
+			m_socket->abort();
+			onDisconnected();
+			return;
+		}
+		type = innerType;
+		payload = inner;
+
 		if( type == FrameType::Audio && ( m_roles & ReceiveTeacher ) && m_playback && payload.size() > 4 &&
 			payload.size() <= 4 + MaxFrameBytes )
 		{
@@ -514,6 +542,6 @@ void LabAudioClient::sendPacket( const QByteArray& packet )
 {
 	if( m_accepted && m_socket->state() == QAbstractSocket::ConnectedState && m_socket->bytesToWrite() < 64 * 1024 )
 	{
-		m_socket->write( frame( FrameType::Audio, audioPayload( m_sequence++, packet ) ) );
+		send( FrameType::Audio, audioPayload( m_sequence++, packet ) );
 	}
 }

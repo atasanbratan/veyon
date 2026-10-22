@@ -30,6 +30,7 @@
 #include <QPointer>
 #include <QWidget>
 
+#include "LabAudioCrypto.h"
 #include "LabAudioProtocol.h"
 
 class QTcpServer;
@@ -117,11 +118,14 @@ private:
 		int group{ClassGroup};
 		QString callName;
 		QDateTime callTime;	// valid while the student is calling
+		LabAudioSession session;	// ready after the hello; authenticated after the Auth frame
 	};
 
 	void acceptConnections();
 	void readClient( int id );
 	void handleHello( int id, const QByteArray& payload );
+	void handleAuth( int id, quint8 roles );
+	void sendToClient( Client& client, LabAudioProtocol::FrameType type, const QByteArray& payload );
 	void dropClient( int id );
 	void updateAudio();
 	void sendTeacherPacket( const QByteArray& packet );

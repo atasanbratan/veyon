@@ -57,14 +57,9 @@ int main( int argc, char** argv )
 	bool intruderRejected = false;
 	QTcpSocket intruder;
 	QObject::connect( &intruder, &QTcpSocket::connected, [&]() {
-		QByteArray hello;
-		hello.append( char( Version ) );
-		hello.append( char( ReceiveTeacher ) );
-		const QByteArray bad = "wrong";
-		char len[2];
-		qToBigEndian( quint16( bad.size() ), len );
-		hello.append( len, 2 );
-		hello.append( bad );
+		QByteArray hello( 1, char( Version ) );
+		hello += LabAudioSession::keyId( QByteArrayLiteral( "wrong" ) );
+		hello += LabAudioSession::randomNonce();
 		intruder.write( frame( FrameType::Hello, hello ) );
 	} );
 	QByteArray intruderData;

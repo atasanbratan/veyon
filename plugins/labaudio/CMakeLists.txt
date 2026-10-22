@@ -2,6 +2,7 @@ include(BuildVeyonPlugin)
 
 find_package(Qt${QT_MAJOR_VERSION} COMPONENTS Multimedia REQUIRED)
 find_package(PkgConfig REQUIRED)
+find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 pkg_check_modules(OPUS REQUIRED IMPORTED_TARGET opus)
 
 build_veyon_plugin(labaudio
@@ -13,6 +14,8 @@ build_veyon_plugin(labaudio
 	LabAudioHub.h
 	LabAudioClient.cpp
 	LabAudioClient.h
+	LabAudioCrypto.cpp
+	LabAudioCrypto.h
 	LabAudioEngine.cpp
 	LabAudioEngine.h
 	LabAudioGroupWork.cpp
@@ -21,4 +24,4 @@ build_veyon_plugin(labaudio
 	labaudio.qrc
 	)
 
-target_link_libraries(labaudio PRIVATE Qt${QT_MAJOR_VERSION}::Multimedia PkgConfig::OPUS)
+target_link_libraries(labaudio PRIVATE Qt${QT_MAJOR_VERSION}::Multimedia PkgConfig::OPUS OpenSSL::Crypto)

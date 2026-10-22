@@ -32,11 +32,13 @@
 
 // Framing over one TCP connection per student:
 //   [u32 big-endian payload length][u8 type][payload bytes]
-// The first frame from the client must be Hello; anything else closes the connection.
+// Handshake (plain): client Hello, hub HelloAck, then the client's first Encrypted frame (Auth)
+// proves it knows the token. From then on every frame is Encrypted (see LabAudioCrypto.h); the
+// types below Encrypted travel inside it. Anything else closes the connection.
 namespace LabAudioProtocol
 {
 
-static constexpr quint8 Version = 1;
+static constexpr quint8 Version = 2;
 static constexpr int SampleRate = 48000;
 static constexpr int Channels = 1;
 static constexpr int FrameSamples = 960;			// 20 ms at 48 kHz
@@ -46,13 +48,15 @@ static constexpr int HelloTimeoutMs = 5000;
 
 enum class FrameType : quint8
 {
-	Hello = 1,		// client -> hub: u8 version, u8 role flags, u16 token length, token bytes
-	HelloAck = 2,	// hub -> client: u8 accepted (1/0)
+	Hello = 1,		// client -> hub (plain): u8 version, u8 role flags, 8 byte key id, 16 byte client nonce
+	HelloAck = 2,	// hub -> client (plain): u8 accepted (1/0) [, 16 byte hub nonce]
 	Audio = 3,		// both directions: u32 sequence, Opus packet
 	Bye = 4,
 	Status = 5,		// hub -> client: u8 StatusFlag bits (what the teacher does with the client's group)
 	PeerAudio = 6,	// hub -> client: u32 source id, u32 sequence, Opus packet of a group member
-	CallTeacher = 7	// client -> hub: u8 calling (1/0), UTF-8 student name; hub -> client: u8 0 = call answered
+	CallTeacher = 7,	// client -> hub: u8 calling (1/0), UTF-8 student name; hub -> client: u8 0 = call answered
+	Auth = 8,		// client -> hub, first encrypted frame (empty)
+	Encrypted = 16	// AES-256-GCM of u8 inner type + inner payload, followed by the 16 byte tag
 };
 
 static constexpr int MaxNameBytes = 200;

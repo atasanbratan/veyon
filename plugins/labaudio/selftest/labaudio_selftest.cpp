@@ -18,6 +18,7 @@
 
 #include <opus/opus.h>
 
+#include "../LabAudioCrypto.h"
 #include "../LabAudioEngine.h"
 #include "../LabAudioProtocol.h"
 
@@ -248,6 +249,66 @@ static void testMixer()
 	opus_encoder_destroy( encoder4 );
 }
 
+// Opens an Encrypted frame produced by seal() (strips the frame header).
+static bool openFrame( LabAudioSession& session, const QByteArray& sealed, FrameType& type, QByteArray& payload )
+{
+	FrameReader reader;
+	reader.append( sealed );
+	FrameType outer;
+	QByteArray encrypted;
+	bool error = false;
+	return reader.next( outer, encrypted, error ) && outer == FrameType::Encrypted &&
+		   session.open( encrypted, type, payload );
+}
+
+static void testCrypto()
+{
+	const QByteArray token = QByteArrayLiteral( "class token with 64 random bytes in real use" );
+	const auto clientNonce = LabAudioSession::randomNonce();
+	const auto hubNonce = LabAudioSession::randomNonce();
+	CHECK( clientNonce.size() == LabAudioSession::NonceSize && clientNonce != hubNonce, "random nonces" );
+	CHECK( LabAudioSession::keyId( token ) == LabAudioSession::keyId( token ) &&
+		   LabAudioSession::keyId( token ) != LabAudioSession::keyId( token + "x" ) &&
+		   token.contains( LabAudioSession::keyId( token ) ) == false,
+		   "key id identifies the token without containing it" );
+
+	LabAudioSession client, hub;
+	client.init( token, clientNonce, hubNonce, LabAudioSession::Role::Client );
+	hub.init( token, clientNonce, hubNonce, LabAudioSession::Role::Hub );
+
+	const QByteArray secret = QByteArrayLiteral( "this is the student's voice" );
+	FrameType type;
+	QByteArray payload;
+	const auto first = client.seal( FrameType::Audio, secret );
+	CHECK( first.contains( secret ) == false, "payload is not visible in the encrypted frame" );
+	CHECK( openFrame( hub, first, type, payload ) && type == FrameType::Audio && payload == secret,
+		   "hub decrypts what the client sealed" );
+	CHECK( openFrame( hub, first, type, payload ) == false, "replayed frame is rejected" );
+
+	auto second = client.seal( FrameType::Audio, secret );
+	second[second.size() - 20] = char( second.at( second.size() - 20 ) ^ 0x01 );
+	CHECK( openFrame( hub, second, type, payload ) == false, "modified frame is rejected" );
+
+	const auto toClient = hub.seal( FrameType::Status, QByteArray( 1, 1 ) );
+	CHECK( openFrame( client, toClient, type, payload ) && type == FrameType::Status, "hub -> client direction" );
+
+	LabAudioSession wrong;
+	wrong.init( QByteArrayLiteral( "guessed token" ), clientNonce, hubNonce, LabAudioSession::Role::Hub );
+	CHECK( openFrame( wrong, client.seal( FrameType::Audio, secret ), type, payload ) == false,
+		   "wrong token cannot decrypt" );
+
+	LabAudioSession otherConnection;
+	otherConnection.init( token, LabAudioSession::randomNonce(), hubNonce, LabAudioSession::Role::Hub );
+	LabAudioSession freshClient;
+	freshClient.init( token, clientNonce, hubNonce, LabAudioSession::Role::Client );
+	CHECK( openFrame( otherConnection, freshClient.seal( FrameType::Audio, secret ), type, payload ) == false,
+		   "frames of one connection are useless in another" );
+
+	std::printf( "      encryption overhead %d bytes per frame\n", LabAudioSession::Overhead );
+}
+
+
+
 int main( int argc, char** argv )
 {
 	QCoreApplication app( argc, argv );
@@ -259,6 +320,7 @@ int main( int argc, char** argv )
 	}
 	testFraming();
 	testMixer();
+	testCrypto();
 	std::printf( failures ? "\n%d FAILED\n" : "\nALL PASSED\n", failures );
 	return failures ? 1 : 0;
 }

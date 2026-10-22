@@ -27,6 +27,7 @@
 #include <QTimer>
 #include <QWidget>
 
+#include "LabAudioCrypto.h"
 #include "LabAudioProtocol.h"
 
 class QLabel;
@@ -108,6 +109,7 @@ private:
 	void startAudio();
 	void stopAudio();
 	void sendPacket( const QByteArray& packet );
+	void send( LabAudioProtocol::FrameType type, const QByteArray& payload );
 
 	QStringList m_hosts;
 	int m_hostIndex{0};
@@ -122,6 +124,8 @@ private:
 	bool m_calling{false};
 	QTcpSocket* m_socket;
 	LabAudioProtocol::FrameReader m_reader;
+	LabAudioSession m_session;
+	QByteArray m_clientNonce;
 	QTimer m_reconnectTimer;
 	bool m_accepted{false};
 	quint32 m_sequence{0};

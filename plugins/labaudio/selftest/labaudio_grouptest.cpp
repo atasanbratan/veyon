@@ -42,20 +42,21 @@ static void wait( int ms )
 class FakeStudent : public QObject
 {
 public:
-	FakeStudent( int port, const QByteArray& token, quint8 roles )
+	// claimedToken: the token whose (public) key id is announced; differs from token for a forger
+	// who saw a key id on the network but does not know the token.
+	FakeStudent( int port, const QByteArray& token, quint8 roles, const QByteArray& claimedToken = {} )
 	{
-		connect( &socket, &QTcpSocket::connected, this, [this, token, roles]() {
-			QByteArray hello;
-			hello.append( char( Version ) );
-			hello.append( char( roles ) );
-			char length[2];
-			qToBigEndian( quint16( token.size() ), length );
-			hello.append( length, 2 );
-			hello.append( token );
+		connect( &socket, &QTcpSocket::connected, this, [this, token, claimedToken]() {
+			clientNonce = LabAudioSession::randomNonce();
+			QByteArray hello( 1, char( Version ) );
+			hello += LabAudioSession::keyId( claimedToken.isEmpty() ? token : claimedToken );
+			hello += clientNonce;
 			socket.write( frame( FrameType::Hello, hello ) );
 		} );
-		connect( &socket, &QTcpSocket::readyRead, this, [this]() {
-			reader.append( socket.readAll() );
+		connect( &socket, &QTcpSocket::readyRead, this, [this, token, roles]() {
+			const auto data = socket.readAll();
+			raw += data;
+			reader.append( data );
 			FrameType type;
 			QByteArray payload;
 			bool error = false;
@@ -67,9 +68,20 @@ public:
 				}
 				if( type == FrameType::HelloAck )
 				{
-					accepted = payload.size() == 1 && payload.at( 0 ) == 1;
+					accepted = payload.size() == 1 + LabAudioSession::NonceSize && payload.at( 0 ) == 1 &&
+							   session.init( token, clientNonce, payload.mid( 1 ), LabAudioSession::Role::Client );
+					if( accepted )
+					{
+						socket.write( session.seal( FrameType::Auth, QByteArray( 1, char( roles ) ) ) );
+					}
+					continue;
 				}
-				else if( type == FrameType::PeerAudio )
+				if( type != FrameType::Encrypted || session.open( payload, type, payload ) == false )
+				{
+					++notAuthentic;
+					continue;
+				}
+				if( type == FrameType::PeerAudio )
 				{
 					peerSources.append( int( qFromBigEndian<quint32>( payload.constData() ) ) );
 				}
@@ -93,18 +105,22 @@ public:
 
 	void sendAudio( quint32 sequence )
 	{
-		socket.write( frame( FrameType::Audio, audioPayload( sequence, QByteArray( 60, char( 0x55 ) ) ) ) );
+		socket.write( session.seal( FrameType::Audio, audioPayload( sequence, QByteArray( 60, char( 0x55 ) ) ) ) );
 	}
 
 	void call( bool calling, const QString& name )
 	{
 		QByteArray payload( 1, calling ? 1 : 0 );
 		payload.append( name.toUtf8() );
-		socket.write( frame( FrameType::CallTeacher, payload ) );
+		socket.write( session.seal( FrameType::CallTeacher, payload ) );
 	}
 
 	QTcpSocket socket;
 	FrameReader reader;
+	LabAudioSession session;
+	QByteArray clientNonce;
+	int notAuthentic{0};
+	QByteArray raw;	// everything received, as an eavesdropper on the network would see it
 	bool accepted{false};
 	bool disconnected{false};
 	QList<int> peerSources;
@@ -192,6 +208,8 @@ int main( int argc, char** argv )
 	FakeStudent dan( port, group2, groupRoles );
 	FakeStudent classStudent( port, classToken, ReceiveTeacher );
 	FakeStudent intruder( port, QByteArrayLiteral( "guessed-token-0123456789" ), groupRoles );
+	// Knows group 1's public key id (e.g. sniffed from a Hello) but not its token.
+	FakeStudent forger( port, QByteArrayLiteral( "guessed-token-0123456789" ), groupRoles, group1 );
 	const auto allAccepted = [&]() {
 		return anna.accepted && ben.accepted && carla.accepted && dan.accepted && classStudent.accepted;
 	};
@@ -216,6 +234,13 @@ int main( int argc, char** argv )
 	CHECK( anna.peerSources.isEmpty(), "speaker does not hear herself" );
 	CHECK( carla.peerSources.isEmpty() && dan.peerSources.isEmpty(), "other group hears nothing" );
 	CHECK( classStudent.peerSources.isEmpty(), "class student hears nothing" );
+
+	// Encryption: the audio bytes never appear in clear on the wire, and knowing a key id is useless.
+	CHECK( ben.raw.size() > 10 * 60 && ben.raw.contains( QByteArray( 24, char( 0x55 ) ) ) == false,
+		   "audio is encrypted on the wire" );
+	CHECK( forger.disconnected && forger.peerSources.isEmpty() && forger.teacherAudio == 0,
+		   "forger with a sniffed key id is disconnected and hears nothing" );
+	CHECK( anna.notAuthentic == 0 && ben.notAuthentic == 0, "all frames from the hub are authentic" );
 
 	const int carlaStatusBefore = int( carla.status.size() );
 	hub.setFocus( 1, false );

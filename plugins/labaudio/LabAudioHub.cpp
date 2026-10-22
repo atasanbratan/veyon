@@ -201,10 +201,7 @@ void LabAudioHub::answerCall( int clientId )
 		return;
 	}
 	it->callTime = {};
-	if( it->socket )
-	{
-		it->socket->write( frame( FrameType::CallTeacher, QByteArray( 1, 0 ) ) );
-	}
+	sendToClient( it.value(), FrameType::CallTeacher, QByteArray( 1, 0 ) );
 	updateCalls();
 }
 
@@ -368,7 +365,7 @@ void LabAudioHub::sendStatus( int id )
 			flags |= TeacherTalking;
 		}
 	}
-	client.socket->write( frame( FrameType::Status, QByteArray( 1, char( flags ) ) ) );
+	sendToClient( client, FrameType::Status, QByteArray( 1, char( flags ) ) );
 }
 
 
@@ -423,7 +420,7 @@ void LabAudioHub::readClient( int id )
 	while( m_clients.contains( id ) && m_clients[id].reader.next( type, payload, error ) )
 	{
 		auto& client = m_clients[id];
-		if( client.authenticated == false )
+		if( client.session.isReady() == false )
 		{
 			if( type != FrameType::Hello )
 			{
@@ -431,6 +428,30 @@ void LabAudioHub::readClient( int id )
 				return;
 			}
 			handleHello( id, payload );
+			continue;
+		}
+
+		// After the hello, only authentic encrypted frames are accepted.
+		FrameType innerType;
+		QByteArray inner;
+		if( type != FrameType::Encrypted || client.session.open( payload, innerType, inner ) == false )
+		{
+			vWarning() << "LabAudio client" << ( client.socket ? client.socket->peerAddress().toString() : QString() )
+					   << "sent a frame that is not authentic - disconnecting";
+			dropClient( id );
+			return;
+		}
+		type = innerType;
+		payload = inner;
+
+		if( client.authenticated == false )
+		{
+			if( type != FrameType::Auth || payload.size() != 1 )
+			{
+				dropClient( id );
+				return;
+			}
+			handleAuth( id, quint8( payload.at( 0 ) ) );
 			continue;
 		}
 
@@ -470,57 +491,74 @@ void LabAudioHub::readClient( int id )
 void LabAudioHub::handleHello( int id, const QByteArray& payload )
 {
 	auto& client = m_clients[id];
-	bool accepted = false;
+	constexpr int HelloSize = 1 + LabAudioSession::KeyIdSize + LabAudioSession::NonceSize;
 	QString reason = QStringLiteral( "malformed hello" );
-	if( payload.size() >= 4 && quint8( payload.at( 0 ) ) != Version )
+	QByteArray token;
+	int group = NoGroup;
+	if( payload.size() >= 1 && quint8( payload.at( 0 ) ) != Version )
 	{
-		reason = QStringLiteral( "protocol version %1, expected %2" ).arg( quint8( payload.at( 0 ) ) ).arg( Version );
+		reason = QStringLiteral( "protocol version %1, expected %2 (update Veyon on this computer)" )
+					 .arg( quint8( payload.at( 0 ) ) ).arg( Version );
 	}
-	else if( payload.size() >= 4 )
+	else if( payload.size() == HelloSize )
 	{
-		const auto roles = quint8( payload.at( 1 ) );
-		const auto tokenLength = qFromBigEndian<quint16>( payload.constData() + 2 );
-		const auto token = payload.mid( 4, tokenLength );
-		reason = QStringLiteral( "token %1, expected %2 or one of %3 group tokens" )
-					 .arg( tokenFingerprint( token ), tokenFingerprint( m_token ) ).arg( m_groupTokens.size() );
-		int group = NoGroup;
-		if( payload.size() == 4 + tokenLength )
+		// The client names its token only by its public key id; the token itself never travels.
+		const auto keyId = payload.mid( 1, LabAudioSession::KeyIdSize );
+		reason = QStringLiteral( "unknown key (outdated mode or wrong teacher)" );
+		if( constantTimeEquals( keyId, LabAudioSession::keyId( m_token ) ) )
 		{
-			if( constantTimeEquals( token, m_token ) )
-			{
-				group = ClassGroup;
-			}
-			for( auto it = m_groupTokens.cbegin(); it != m_groupTokens.cend(); ++it )
-			{
-				if( constantTimeEquals( token, it.key() ) )
-				{
-					group = it.value();
-				}
-			}
+			token = m_token;
+			group = ClassGroup;
 		}
-		if( group != NoGroup )
+		for( auto it = m_groupTokens.cbegin(); it != m_groupTokens.cend(); ++it )
 		{
-			client.roles = roles & ( ReceiveTeacher | SendMicrophone | ReceivePeers );
-			client.group = group;
-			client.token = token;
-			client.authenticated = true;
-			accepted = true;
+			if( constantTimeEquals( keyId, LabAudioSession::keyId( it.key() ) ) )
+			{
+				token = it.key();
+				group = it.value();
+			}
 		}
 	}
 
-	client.socket->write( frame( FrameType::HelloAck, QByteArray( 1, accepted ? 1 : 0 ) ) );
-	if( accepted == false )
+	const auto hubNonce = LabAudioSession::randomNonce();
+	if( group == NoGroup || hubNonce.isEmpty() ||
+		client.session.init( token, payload.mid( 1 + LabAudioSession::KeyIdSize ), hubNonce,
+							 LabAudioSession::Role::Hub ) == false )
 	{
+		client.socket->write( frame( FrameType::HelloAck, QByteArray( 1, 0 ) ) );
 		vWarning() << "LabAudio client" << client.socket->peerAddress().toString() << "rejected:" << reason;
 		client.socket->flush();
 		dropClient( id );
 		return;
 	}
+	client.group = group;
+	client.token = token;
+	client.socket->write( frame( FrameType::HelloAck, QByteArray( 1, 1 ) + hubNonce ) );
+	// Not yet authenticated: the client still has to prove that it knows the token (Auth frame).
+}
+
+
+
+void LabAudioHub::handleAuth( int id, quint8 roles )
+{
+	auto& client = m_clients[id];
+	client.roles = roles & ( ReceiveTeacher | SendMicrophone | ReceivePeers );
+	client.authenticated = true;
 	client.helloTimer->stop();
 	vInfo() << "LabAudio client" << client.socket->peerAddress().toString() << "joined group" << client.group
 			<< "with roles" << client.roles;
 	sendStatus( id );
 	updateAudio();
+}
+
+
+
+void LabAudioHub::sendToClient( Client& client, FrameType type, const QByteArray& payload )
+{
+	if( client.authenticated && client.socket && client.session.isReady() )
+	{
+		client.socket->write( client.session.seal( type, payload ) );
+	}
 }
 
 
@@ -602,13 +640,14 @@ void LabAudioHub::updateAudio()
 
 void LabAudioHub::sendTeacherPacket( const QByteArray& packet )
 {
-	const auto data = frame( FrameType::Audio, audioPayload( m_sequence++, packet ) );
+	const auto payload = audioPayload( m_sequence++, packet );
 	int receivers = 0;
 	for( auto& client : m_clients )
 	{
 		if( hearsTeacher( client ) && client.socket && client.socket->bytesToWrite() < MaxQueuedBytes )
 		{
-			client.socket->write( data );
+			// Encrypted for each student with that connection's key.
+			sendToClient( client, FrameType::Audio, payload );
 			++receivers;
 		}
 	}
@@ -633,9 +672,10 @@ void LabAudioHub::forwardStudentAudio( int sourceId, const QByteArray& audioPayl
 		}
 		if( data.isEmpty() )
 		{
-			data = frame( FrameType::PeerAudio, peerAudioPayload( quint32( sourceId ), audioPayload ) );
+			data = peerAudioPayload( quint32( sourceId ), audioPayload );
 		}
-		client.socket->write( data );
+		// Decrypted from the speaker, re-encrypted for each listener with that listener's key.
+		sendToClient( client, FrameType::PeerAudio, data );
 		++receivers;
 	}
 	Q_EMIT peerPacketForwarded( sourceId, receivers );
