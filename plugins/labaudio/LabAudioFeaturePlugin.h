@@ -31,9 +31,8 @@
 #include "CryptoCore.h"
 #include "Feature.h"
 #include "FeatureProviderInterface.h"
-#include "LabAudioCallBoard.h"
-#include "LabAudioCalls.h"
 #include "LabAudioGroupWork.h"
+#include "../labaudiocalls/LabAudioCallProtocol.h"
 
 class LabAudioClient;
 class LabAudioHub;
@@ -121,13 +120,6 @@ public:
 							   const MessageContext& messageContext,
 							   const FeatureMessage& message ) override;
 
-	bool handleFeatureMessage( ComputerControlInterface::Pointer computerControlInterface,
-							   const FeatureMessage& message ) override;
-
-	bool handleFeatureMessageFromWorker( VeyonServerInterface& server, const FeatureMessage& message ) override;
-
-	void sendAsyncFeatureMessages( VeyonServerInterface& server, const MessageContext& messageContext ) override;
-
 	bool handleFeatureMessage( VeyonWorkerInterface& worker, const FeatureMessage& message ) override;
 
 	bool isFeatureActive( VeyonServerInterface& server, Feature::Uid featureUid ) const override;
@@ -135,8 +127,6 @@ public:
 	// Default TCP port of the teacher's audio hub (plus the Veyon session id on multi-session hosts).
 	static constexpr int DefaultHubPort = 11500;
 	static constexpr int HubKeepAliveIntervalMs = 5000;
-	static constexpr int CallTrayRetryMs = 15000;
-	static constexpr int CallTrayCheckMs = 3000;
 
 private:
 	enum class FeatureCommand {
@@ -149,6 +139,13 @@ private:
 		AnswerCall,		// Master -> server
 		SetCallsAllowed	// Master -> server
 	};
+
+	// The LabAudioCalls plugin exchanges messages of the client feature with this plugin.
+	static_assert( int( FeatureCommand::StartClient ) == LabAudioCallProtocol::StartClient );
+	static_assert( int( FeatureCommand::SetCalling ) == LabAudioCallProtocol::SetCalling );
+	static_assert( int( FeatureCommand::CallState ) == LabAudioCallProtocol::CallState );
+	static_assert( int( Argument::Calling ) == LabAudioCallProtocol::Calling );
+	static_assert( int( Argument::CallsAllowed ) == LabAudioCallProtocol::CallsAllowed );
 
 	struct Group
 	{
@@ -165,6 +162,7 @@ private:
 	void regroup();
 	void setGroupFocus( int groupId, bool teacherTalks );
 	void endGroupWork();
+	void publishGroups();
 	void startClient( const ComputerControlInterface::Pointer& student, const QByteArray& token, int roles,
 					  const QStringList& groupMembers = {} );
 	void showTeacherPanel( VeyonMasterInterface& master, const Feature& feature );
@@ -179,15 +177,8 @@ private:
 	// Name plus computer, e.g. "Anna Petrova (PC-07)", for the teacher's list of calls.
 	static QString studentLabel( const ComputerControlInterface::Pointer& computerControlInterface );
 
-	// calling the teacher
-	FeatureMessage callStateMessage( Feature::Uid featureUid ) const;
-	void pushCallState( VeyonServerInterface& server );
-	void ensureCallTray( VeyonServerInterface& server );
-	void sendCalling( Feature::Uid workerFeature, bool calling );
-	LabAudioCallsWindow* callsWindow();
-	void updateCallsWindow();
-	void answerCall( int id );
-	void setCallsAllowed( bool allowed );
+	// ✋ button on the notice (state kept by the LabAudioCalls plugin)
+	void sendCalling( bool calling );
 
 	const Feature m_labAudioFeature;
 	const Feature m_broadcastFeature;
@@ -196,8 +187,6 @@ private:
 	const Feature m_groupWorkFeature;
 	const Feature m_hubFeature;
 	const Feature m_clientFeature;
-	const Feature m_callsFeature;
-	const Feature m_callTrayFeature;
 	const FeatureList m_features;
 
 	QByteArray m_token;
@@ -219,27 +208,8 @@ private:
 	bool m_recordGroups{false};
 	QString m_conversationLabel;
 
-	// calling the teacher: Veyon Server
-	LabAudioCallBoard m_callBoard;
-	QAtomicInteger<qint64> m_lastCallTrayStart{0};
-	QAtomicInteger<qint64> m_lastCallTrayCheck{0};
-
-	// calling the teacher: Veyon Master
-	struct MasterCall
-	{
-		ComputerControlInterface::Pointer computer;
-		QDateTime since;
-	};
-	QHash<int, MasterCall> m_calls;
-	QHash<QString, int> m_callIds;	// computer uid -> call id
-	int m_nextCallId{1};
-	bool m_callsAllowed{true};
-	QPointer<LabAudioCallsWindow> m_callsWindow;
-	VeyonMasterInterface* m_master{nullptr};
-
 	// worker processes
 	VeyonWorkerInterface* m_worker{nullptr};
-	LabAudioCallTray* m_callTray{nullptr};
 	LabAudioHub* m_hub{nullptr};
 	LabAudioClient* m_client{nullptr};
 };

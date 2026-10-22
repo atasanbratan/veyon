@@ -98,23 +98,11 @@ LabAudioFeaturePlugin::LabAudioFeaturePlugin( QObject* parent ) :
 					 Feature::Uid( "65215fe4-021f-4cfe-8e26-25be9599401b" ),
 					 m_labAudioFeature.uid(),
 					 tr( "Lab audio client" ), {}, {} ),
-	m_callsFeature( QStringLiteral( "LabAudioStudentCalls" ),
-					Feature::Flag::Action | Feature::Flag::Master,
-					Feature::Uid( "5e0b1f7a-3c2d-4b8e-9f61-7a4d2c8e1b05" ),
-					m_labAudioFeature.uid(),
-					tr( "Student calls" ), {},
-					tr( "Students who pressed \"Call the teacher\". Here you can also turn calling off, "
-						"for example during a test." ),
-					QStringLiteral(":/labaudio/hand.png") ),
-	m_callTrayFeature( QStringLiteral( "LabAudioCallTray" ),
-					   Feature::Flag::Session | Feature::Flag::Service | Feature::Flag::Worker,
-					   Feature::Uid( "a8d3c6e2-1f47-4c9b-b2e5-6d0f9a3e7c41" ),
-					   m_labAudioFeature.uid(),
-					   {}, {}, {} ),
 	m_features( { m_labAudioFeature, m_broadcastFeature, m_talkFeature, m_listenFeature, m_groupWorkFeature,
-				  m_callsFeature, m_hubFeature, m_clientFeature, m_callTrayFeature } ),
+				  m_hubFeature, m_clientFeature } ),
 	m_token( CryptoCore::generateChallenge() )
 {
+	Q_ASSERT( m_clientFeature.uid() == LabAudioCallProtocol::LabAudioClientFeatureUid );
 	m_hubKeepAliveTimer.setInterval( HubKeepAliveIntervalMs );
 	connect( &m_hubKeepAliveTimer, &QTimer::timeout, this, &LabAudioFeaturePlugin::sendHubCommand );
 }
@@ -125,8 +113,6 @@ LabAudioFeaturePlugin::~LabAudioFeaturePlugin()
 {
 	delete m_groupPanel;
 	delete m_teacherPanel;
-	delete m_callsWindow;
-	delete m_callTray;
 	delete m_client;
 	delete m_hub;
 }
@@ -414,247 +400,20 @@ bool LabAudioFeaturePlugin::startFeature( VeyonMasterInterface& master, const Fe
 	}
 	if( feature == m_groupWorkFeature )
 	{
-		m_master = &master;
 		return startGroupWork( master, computerControlInterfaces );
-	}
-	if( feature == m_callsFeature )
-	{
-		m_master = &master;
-		callsWindow()->present();
-		return true;
 	}
 	return false;
 }
 
 
 
-// ---- calling the teacher ----
-// Student: tray icon worker or the audio notice -> SetCalling -> Veyon Server (LabAudioCallBoard)
-// -> CallState to every connected Veyon Master (sendAsyncFeatureMessages) and back to the workers.
-// Master: "Done" -> AnswerCall; "Students may call" -> SetCallsAllowed.
-
-FeatureMessage LabAudioFeaturePlugin::callStateMessage( Feature::Uid featureUid ) const
-{
-	const auto state = m_callBoard.state();
-	FeatureMessage message{ featureUid, FeatureCommand::CallState };
-	message.addArgument( Argument::Calling, state.calling )
-		.addArgument( Argument::CallsAllowed, state.allowed )
-		.addArgument( Argument::CallTime, state.calling ? state.since.toMSecsSinceEpoch() : qint64( 0 ) );
-	// FeatureMessage has an explicit copy constructor: return a prvalue.
-	return FeatureMessage( message );
-}
-
-
-
-void LabAudioFeaturePlugin::pushCallState( VeyonServerInterface& server )
-{
-	auto& workers = server.featureWorkerManager();
-	for( const auto& feature : { m_callTrayFeature.uid(), m_clientFeature.uid() } )
-	{
-		// Only inform running workers; this must not start an audio client.
-		if( workers.isWorkerRunning( feature ) )
-		{
-			workers.sendMessageToUnmanagedSessionWorker( callStateMessage( feature ) );
-		}
-	}
-}
-
-
-
-void LabAudioFeaturePlugin::ensureCallTray( VeyonServerInterface& server )
-{
-	auto& workers = server.featureWorkerManager();
-	if( workers.isWorkerRunning( m_callTrayFeature.uid() ) ||
-		VeyonCore::platform().sessionFunctions().currentSessionHasUser() == false )
-	{
-		return;
-	}
-	// sendMessageToUnmanagedSessionWorker retries by itself, so do not ask again too often.
-	const auto now = QDateTime::currentMSecsSinceEpoch();
-	if( now - m_lastCallTrayStart.loadAcquire() < CallTrayRetryMs )
-	{
-		return;
-	}
-	m_lastCallTrayStart.storeRelease( now );
-	workers.sendMessageToUnmanagedSessionWorker( callStateMessage( m_callTrayFeature.uid() ) );
-}
-
-
-
-void LabAudioFeaturePlugin::sendCalling( Feature::Uid workerFeature, bool calling )
+void LabAudioFeaturePlugin::sendCalling( bool calling )
 {
 	if( m_worker )
 	{
-		// A worker may only send messages with its own feature uid.
-		m_worker->sendFeatureMessageReply( FeatureMessage{ workerFeature, FeatureCommand::SetCalling }
+		// Handled by the LabAudioCalls plugin in the Veyon Server; a worker may only use its own feature uid.
+		m_worker->sendFeatureMessageReply( FeatureMessage{ m_clientFeature.uid(), FeatureCommand::SetCalling }
 											   .addArgument( Argument::Calling, calling ) );
-	}
-}
-
-
-
-LabAudioCallsWindow* LabAudioFeaturePlugin::callsWindow()
-{
-	if( m_callsWindow.isNull() )
-	{
-		m_callsAllowed = QSettings( QStringLiteral( "Veyon Solutions" ), QStringLiteral( "LabAudio" ) )
-							 .value( QStringLiteral( "callsAllowed" ), true ).toBool();
-		m_callsWindow = new LabAudioCallsWindow( m_master ? m_master->mainWindow() : nullptr );
-		m_callsWindow->setCallsAllowed( m_callsAllowed );
-		connect( m_callsWindow, &LabAudioCallsWindow::answered, this, &LabAudioFeaturePlugin::answerCall );
-		connect( m_callsWindow, &LabAudioCallsWindow::answeredAll, this, [this]() {
-			const auto ids = m_calls.keys();
-			for( const auto id : ids )
-			{
-				answerCall( id );
-			}
-		} );
-		connect( m_callsWindow, &LabAudioCallsWindow::callsAllowedChanged, this, &LabAudioFeaturePlugin::setCallsAllowed );
-		updateCallsWindow();
-	}
-	return m_callsWindow;
-}
-
-
-
-void LabAudioFeaturePlugin::updateCallsWindow()
-{
-	QList<LabAudioCall> calls;
-	for( auto it = m_calls.cbegin(); it != m_calls.cend(); ++it )
-	{
-		int group = 0;
-		for( int g = 0; g < m_groups.size(); ++g )
-		{
-			if( m_groups[g].members.contains( it->computer ) )
-			{
-				group = g + 1;
-			}
-		}
-		calls.append( { it.key(), studentLabel( it->computer ), group, it->since } );
-	}
-	std::sort( calls.begin(), calls.end(), []( const LabAudioCall& a, const LabAudioCall& b ) { return a.time < b.time; } );
-	if( calls.isEmpty() == false || m_callsWindow )
-	{
-		callsWindow()->setCalls( calls );
-	}
-}
-
-
-
-void LabAudioFeaturePlugin::answerCall( int id )
-{
-	const auto call = m_calls.take( id );
-	if( call.computer )
-	{
-		call.computer->sendFeatureMessage( FeatureMessage{ m_callTrayFeature.uid(), FeatureCommand::AnswerCall } );
-	}
-	updateCallsWindow();
-}
-
-
-
-void LabAudioFeaturePlugin::setCallsAllowed( bool allowed )
-{
-	m_callsAllowed = allowed;
-	QSettings( QStringLiteral( "Veyon Solutions" ), QStringLiteral( "LabAudio" ) )
-		.setValue( QStringLiteral( "callsAllowed" ), allowed );
-
-	ComputerControlInterfaceList computers;
-	if( m_master )
-	{
-		computers = m_master->allComputerControlInterfaces();
-	}
-	for( const auto& call : std::as_const( m_calls ) )
-	{
-		if( call.computer && computers.contains( call.computer ) == false )
-		{
-			computers.append( call.computer );
-		}
-	}
-	// Computers connected later learn it when a student tries to call (see handleFeatureMessage).
-	sendFeatureMessage( FeatureMessage{ m_callTrayFeature.uid(), FeatureCommand::SetCallsAllowed }
-							.addArgument( Argument::CallsAllowed, allowed ),
-						computers );
-	if( allowed == false )
-	{
-		m_calls.clear();
-	}
-	updateCallsWindow();
-}
-
-
-
-bool LabAudioFeaturePlugin::handleFeatureMessage( ComputerControlInterface::Pointer computerControlInterface,
-												  const FeatureMessage& message )
-{
-	if( message.featureUid() != m_callTrayFeature.uid() || message.command<FeatureCommand>() != FeatureCommand::CallState ||
-		computerControlInterface.isNull() )
-	{
-		return false;
-	}
-
-	const auto key = computerControlInterface->computer().networkObjectUid().toString();
-	const bool calling = message.argument( Argument::Calling ).toBool();
-	if( calling && m_callsAllowed == false )
-	{
-		// Calling was turned off while this computer was not connected.
-		computerControlInterface->sendFeatureMessage( FeatureMessage{ m_callTrayFeature.uid(), FeatureCommand::SetCallsAllowed }
-														  .addArgument( Argument::CallsAllowed, false ) );
-		return true;
-	}
-
-	if( calling )
-	{
-		if( m_callIds.contains( key ) == false )
-		{
-			m_callIds[key] = m_nextCallId++;
-		}
-		m_calls[m_callIds[key]] = { computerControlInterface,
-									QDateTime::fromMSecsSinceEpoch( message.argument( Argument::CallTime ).toLongLong(), QTimeZone::UTC ) };
-	}
-	else
-	{
-		m_calls.remove( m_callIds.value( key ) );
-	}
-	updateCallsWindow();
-	return true;
-}
-
-
-
-bool LabAudioFeaturePlugin::handleFeatureMessageFromWorker( VeyonServerInterface& server, const FeatureMessage& message )
-{
-	if( ( message.featureUid() != m_callTrayFeature.uid() && message.featureUid() != m_clientFeature.uid() ) ||
-		message.command<FeatureCommand>() != FeatureCommand::SetCalling )
-	{
-		return false;
-	}
-	m_callBoard.setCalling( message.argument( Argument::Calling ).toBool() );
-	// Always answer with the real state, e.g. to undo a click while calls are turned off.
-	pushCallState( server );
-	return true;
-}
-
-
-
-void LabAudioFeaturePlugin::sendAsyncFeatureMessages( VeyonServerInterface& server, const MessageContext& messageContext )
-{
-	// Called from connection threads for every connected Veyon Master. The tray icon is started from
-	// the main thread, which owns the worker processes.
-	// This runs on every screen update, so check at most every few seconds.
-	const auto now = QDateTime::currentMSecsSinceEpoch();
-	const auto lastCheck = m_lastCallTrayCheck.loadAcquire();
-	if( now - lastCheck > CallTrayCheckMs && m_lastCallTrayCheck.testAndSetOrdered( lastCheck, now ) )
-	{
-		QMetaObject::invokeMethod( this, [this, &server]() { ensureCallTray( server ); }, Qt::QueuedConnection );
-	}
-
-	static const char* versionProperty = "labAudioCallVersion";
-	const auto version = m_callBoard.version();
-	if( messageContext.ioDevice() && messageContext.ioDevice()->property( versionProperty ).toInt() != version )
-	{
-		server.sendFeatureMessageReply( messageContext, callStateMessage( m_callTrayFeature.uid() ) );
-		messageContext.ioDevice()->setProperty( versionProperty, version );
 	}
 }
 
@@ -739,6 +498,23 @@ void LabAudioFeaturePlugin::assignGroups( const QList<QList<int>>& groups )
 		m_groups.append( group );
 	}
 	vWarning() << "LabAudio: group work with" << m_groups.size() << "groups of" << m_groupSize;
+	publishGroups();
+}
+
+
+
+void LabAudioFeaturePlugin::publishGroups()
+{
+	// For the "Students calling" window of the LabAudioCalls plugin (same Veyon Master process).
+	QVariantMap groupOfComputer;
+	for( int g = 0; g < m_groups.size(); ++g )
+	{
+		for( const auto& member : std::as_const( m_groups[g].members ) )
+		{
+			groupOfComputer[member->computer().networkObjectUid().toString()] = g + 1;
+		}
+	}
+	qApp->setProperty( LabAudioCallProtocol::GroupOfComputerProperty, groupOfComputer );
 }
 
 
@@ -802,6 +578,7 @@ void LabAudioFeaturePlugin::setGroupFocus( int groupId, bool teacherTalks )
 void LabAudioFeaturePlugin::endGroupWork()
 {
 	m_groups.clear();
+	publishGroups();
 	m_groupStudents.clear();
 	m_focusGroup = -1;
 	m_teacherTalks = false;
@@ -817,7 +594,6 @@ void LabAudioFeaturePlugin::endGroupWork()
 bool LabAudioFeaturePlugin::startMode( VeyonMasterInterface& master, const Feature& feature,
 									   const ComputerControlInterfaceList& computerControlInterfaces )
 {
-	m_master = &master;
 	auto targets = computerControlInterfaces;
 	// Never connect the teacher's own computer as a student.
 	targets.removeLocalHostInterfaces();
@@ -892,24 +668,6 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonServerInterface& server, 
 {
 	auto& workers = server.featureWorkerManager();
 
-	if( message.featureUid() == m_callTrayFeature.uid() )
-	{
-		bool changed = false;
-		if( message.command<FeatureCommand>() == FeatureCommand::AnswerCall )
-		{
-			changed = m_callBoard.answer();
-		}
-		else if( message.command<FeatureCommand>() == FeatureCommand::SetCallsAllowed )
-		{
-			changed = m_callBoard.setAllowed( message.argument( Argument::CallsAllowed ).toBool() );
-		}
-		if( changed )
-		{
-			pushCallState( server );
-		}
-		return true;
-	}
-
 	if( message.featureUid() == m_hubFeature.uid() )
 	{
 		if( message.command<FeatureCommand>() == FeatureCommand::StopHub &&
@@ -966,8 +724,6 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonServerInterface& server, 
 		{
 			workers.sendMessageToUnmanagedSessionWorker( message );
 		}
-		// The new notice shows whether this student is already calling.
-		pushCallState( server );
 		return true;
 	}
 
@@ -979,20 +735,6 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonServerInterface& server, 
 bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonWorkerInterface& worker, const FeatureMessage& message )
 {
 	m_worker = &worker;
-
-	if( message.featureUid() == m_callTrayFeature.uid() && message.command<FeatureCommand>() == FeatureCommand::CallState )
-	{
-		if( m_callTray == nullptr )
-		{
-			m_callTray = new LabAudioCallTray;
-			connect( m_callTray, &LabAudioCallTray::callToggled, this, [this]( bool calling ) {
-				sendCalling( m_callTrayFeature.uid(), calling );
-			} );
-		}
-		m_callTray->setState( message.argument( Argument::Calling ).toBool(),
-							  message.argument( Argument::CallsAllowed ).toBool() );
-		return true;
-	}
 
 	if( message.featureUid() == m_hubFeature.uid() )
 	{
@@ -1072,7 +814,7 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonWorkerInterface& worker, 
 										   roles,
 										   message.argument( Argument::GroupMembers ).toStringList() );
 			connect( m_client->indicator(), &LabAudioIndicator::callToggled, this, [this]( bool calling ) {
-				sendCalling( m_clientFeature.uid(), calling );
+				sendCalling( calling );
 			} );
 			return true;
 		}

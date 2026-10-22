@@ -22,7 +22,7 @@
 
 #include <opus/opus.h>
 
-#include "../LabAudioCallBoard.h"
+#include "../../labaudiocalls/LabAudioCallBoard.h"
 #include "../LabAudioCrypto.h"
 #include "../LabAudioEngine.h"
 #include "../LabAudioProtocol.h"

@@ -23,7 +23,12 @@ Starting another mode on a computer replaces its previous mode. "Stop" on the gr
   Veyon's own connection (`sendAsyncFeatureMessages`, no extra port) and back to the tray and the notice. A call
   waits until a Master connects. Master shows "Students calling" (name, computer, group, time, beep) with **Done**,
   **All done** and **Students may call the teacher** (off e.g. during a test; remembered per teacher). Also opened
-  from the toolbar: Lab audio → Student calls.
+  from the toolbar button **Student calls**.
+- This is a separate plugin, `plugins/labaudiocalls`. Veyon Server reports every running worker as an active
+  feature, and Veyon Master treats all features of one plugin as related: inside the LabAudio plugin the
+  always-running tray worker made "Stop lab audio" appear in every student's context menu. Both plugins exchange
+  LabAudio client messages for the notice's ✋ button; the shared numbers are in `LabAudioCallProtocol.h` and
+  checked with `static_assert`. The group number for the calls window is handed over as a `qApp` property.
 - **Student volume**: slider on the notice, 0–200 %, applied in the mixer, remembered per Windows user.
 - **Teacher microphone**: the teacher panel (Speak / Talk) and the group panel have **Microphone on/off** and
   **Push to talk** (hold the button or Space while the panel is active). Muting sends silent frames so the

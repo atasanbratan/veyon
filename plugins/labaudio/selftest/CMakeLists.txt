@@ -20,6 +20,6 @@ target_link_libraries(labaudio_loopback PRIVATE Qt6::Widgets Qt6::Network Qt6::M
 
 # Group work routing with simulated students (no audio devices needed while no group is in focus).
 add_executable(labaudio_grouptest labaudio_grouptest.cpp
-	../LabAudioHub.cpp ../LabAudioHub.h ../LabAudioRecorder.cpp ../LabAudioRecorder.h ../LabAudioClient.cpp ../LabAudioClient.h ../LabAudioCalls.cpp ../LabAudioCalls.h ../LabAudioCrypto.cpp ../LabAudioCrypto.h ../LabAudioGroupWork.cpp ../LabAudioGroupWork.h ../LabAudioEngine.cpp ../LabAudioEngine.h)
+	../LabAudioHub.cpp ../LabAudioHub.h ../LabAudioRecorder.cpp ../LabAudioRecorder.h ../LabAudioClient.cpp ../LabAudioClient.h ../../labaudiocalls/LabAudioCalls.cpp ../../labaudiocalls/LabAudioCalls.h ../LabAudioCrypto.cpp ../LabAudioCrypto.h ../LabAudioGroupWork.cpp ../LabAudioGroupWork.h ../LabAudioEngine.cpp ../LabAudioEngine.h)
 target_include_directories(labaudio_grouptest BEFORE PRIVATE shim)
 target_link_libraries(labaudio_grouptest PRIVATE Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::OPUS OpenSSL::Crypto)

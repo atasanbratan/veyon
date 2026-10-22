@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/labaudiocalls" >
+        <file>hand.png</file>
+        <file>hand-calling.png</file>
+    </qresource>
+</RCC>

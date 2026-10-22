@@ -198,7 +198,7 @@ void LabAudioCallTray::toggle()
 
 void LabAudioCallTray::update()
 {
-	const QIcon idle( QStringLiteral( ":/labaudio/hand.png" ) );
+	const QIcon idle( QStringLiteral( ":/labaudiocalls/hand.png" ) );
 	if( m_allowed == false )
 	{
 		m_tray->setIcon( QIcon( idle.pixmap( 64, QIcon::Disabled ) ) );
@@ -210,7 +210,7 @@ void LabAudioCallTray::update()
 	m_action->setEnabled( true );
 	if( m_calling )
 	{
-		m_tray->setIcon( QIcon( QStringLiteral( ":/labaudio/hand-calling.png" ) ) );
+		m_tray->setIcon( QIcon( QStringLiteral( ":/labaudiocalls/hand-calling.png" ) ) );
 		m_tray->setToolTip( tr( "Calling the teacher… (click to cancel)" ) );
 		m_action->setText( tr( "Cancel the call" ) );
 	}

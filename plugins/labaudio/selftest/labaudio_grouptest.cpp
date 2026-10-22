@@ -20,7 +20,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-#include "../LabAudioCalls.h"
+#include "../../labaudiocalls/LabAudioCalls.h"
 #include "../LabAudioClient.h"
 #include "../LabAudioGroupWork.h"
 #include "../LabAudioHub.h"
