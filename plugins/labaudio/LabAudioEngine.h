@@ -89,6 +89,8 @@ public:
 	{
 		return int( m_streams.size() );
 	}
+	// Current jitter buffer target of a stream in frames (0 for an unknown stream).
+	int targetFrames( int streamId ) const;
 
 	bool isSequential() const override
 	{
@@ -108,12 +110,19 @@ private:
 		quint32 nextSequence{0};
 		bool primed{false};
 		bool initialized{false};
+		int targetFrames{MinTargetFrames};
+		qint64 samplesSinceUnderflow{0};
 	};
 
 	qint16 mixedSample();
 
-	static constexpr int TargetBufferedFrames = 3;		// 60 ms before playback starts
-	static constexpr int MaxBufferedFrames = 12;		// drop backlog beyond 240 ms
+	// TCP never loses audio, so every gap is network jitter (e.g. Wi-Fi bursts). The buffer target
+	// grows after each underflow and shrinks again slowly while playback stays smooth.
+	static constexpr int MinTargetFrames = 3;			// 60 ms
+	static constexpr int MaxTargetFrames = 15;			// 300 ms
+	static constexpr int UnderflowGrowFrames = 2;
+	static constexpr int ShrinkAfterSamples = 15 * 48000;	// 15 s without underflow
+	static constexpr int BacklogFrames = 10;			// drop backlog beyond target + 200 ms
 
 	QHash<int, Stream> m_streams;
 	QAudioFormat m_format;

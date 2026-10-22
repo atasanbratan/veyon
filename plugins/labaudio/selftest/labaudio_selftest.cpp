@@ -162,6 +162,32 @@ static void testMixer()
 	}
 	CHECK( rms( lossOut ) > 0.25, "two lost frames concealed" );
 
+	// A late burst (Wi-Fi) empties the buffer: the target grows, then excess drains gradually.
+	LabAudioMixer jittery;
+	jittery.setOutputFormat( format );
+	jittery.open( QIODevice::ReadOnly | QIODevice::Unbuffered );
+	auto encoder5 = opus_encoder_create( SampleRate, Channels, OPUS_APPLICATION_VOIP, &err );
+	int seq = 0;
+	for( ; seq < 3; ++seq )
+	{
+		jittery.addPacket( 1, quint32( seq ), encodeSineFrame( encoder5, seq ) );
+	}
+	for( int i = 0; i < 4; ++i )
+	{
+		jittery.read( FrameSamples * 2 );
+	}
+	CHECK( jittery.targetFrames( 1 ) == 5, "underflow grows jitter buffer from 60 to 100 ms" );
+	for( ; seq < 33; ++seq )
+	{
+		jittery.addPacket( 1, quint32( seq ), encodeSineFrame( encoder5, seq ) );
+	}
+	QByteArray smooth;
+	for( int i = 0; i < 10; ++i )
+	{
+		smooth += jittery.read( FrameSamples * 2 );
+	}
+	CHECK( rms( smooth ) > 0.25 && jittery.targetFrames( 1 ) == 5, "playback continues smoothly after a burst" );
+
 	// Resampling to a 44.1 kHz stereo float device.
 	LabAudioMixer resampled;
 	QAudioFormat device;

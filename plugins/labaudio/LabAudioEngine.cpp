@@ -299,7 +299,7 @@ void LabAudioMixer::addPacket( int streamId, quint32 sequence, const QByteArray&
 	stream.nextSequence = sequence + 1;
 	stream.initialized = true;
 
-	const auto maxSamples = size_t( MaxBufferedFrames * FrameSamples );
+	const auto maxSamples = size_t( ( stream.targetFrames + BacklogFrames ) * FrameSamples );
 	while( stream.samples.size() > maxSamples )
 	{
 		stream.samples.pop_front();
@@ -321,6 +321,15 @@ void LabAudioMixer::removeStream( int streamId )
 
 
 
+int LabAudioMixer::targetFrames( int streamId ) const
+{
+	QMutexLocker locker( &s_mixerMutex );
+	const auto it = m_streams.constFind( streamId );
+	return it == m_streams.constEnd() ? 0 : it->targetFrames;
+}
+
+
+
 qint64 LabAudioMixer::bytesAvailable() const
 {
 	// Endless stream: silence is produced while no stream has data.
@@ -336,7 +345,7 @@ qint16 LabAudioMixer::mixedSample()
 	{
 		if( stream.primed == false )
 		{
-			if( stream.samples.size() >= size_t( TargetBufferedFrames * FrameSamples ) )
+			if( stream.samples.size() >= size_t( stream.targetFrames * FrameSamples ) )
 			{
 				stream.primed = true;
 			}
@@ -347,11 +356,25 @@ qint16 LabAudioMixer::mixedSample()
 		}
 		if( stream.samples.empty() )
 		{
-			stream.primed = false;	// underflow: rebuffer before resuming
+			// Underflow: the network delivered late, so buffer more before resuming.
+			stream.primed = false;
+			stream.targetFrames = qMin( stream.targetFrames + UnderflowGrowFrames, int( MaxTargetFrames ) );
+			stream.samplesSinceUnderflow = 0;
 			continue;
 		}
 		sum += stream.samples.front();
 		stream.samples.pop_front();
+		// Drain excess latency (after a burst, or sound card clock drift) by skipping 1 sample in 200.
+		if( stream.samples.size() > size_t( ( stream.targetFrames + 2 ) * FrameSamples ) &&
+			stream.samplesSinceUnderflow % 200 == 199 )
+		{
+			stream.samples.pop_front();
+		}
+		if( ++stream.samplesSinceUnderflow >= ShrinkAfterSamples && stream.targetFrames > MinTargetFrames )
+		{
+			--stream.targetFrames;
+			stream.samplesSinceUnderflow = 0;
+		}
 	}
 	return qint16( qBound( -32768, sum, 32767 ) );
 }
