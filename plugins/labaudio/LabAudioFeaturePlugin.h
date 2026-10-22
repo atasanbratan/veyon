@@ -25,6 +25,7 @@
 #pragma once
 
 #include <QPointer>
+#include <QSet>
 #include <QTimer>
 
 #include "ComputerControlInterface.h"
@@ -33,6 +34,7 @@
 #include "Feature.h"
 #include "FeatureProviderInterface.h"
 #include "LabAudioConfiguration.h"
+#include "MessageContext.h"
 #include "LabAudioGroupWork.h"
 #include "../labaudiocalls/LabAudioCallProtocol.h"
 
@@ -67,7 +69,9 @@ public:
 		RecordGroups,
 		RecordingLabels,	// QVariantMap: "0" = conversation, group id = group -> file label
 		BitRate,
-		RecordingsFolder
+		RecordingsFolder,
+		ClientTag,		// the student computer's Veyon uid, reported back by the hub
+		ConnectedClients	// QStringList of client tags
 	};
 	Q_ENUM(Argument)
 
@@ -124,6 +128,11 @@ public:
 							   const MessageContext& messageContext,
 							   const FeatureMessage& message ) override;
 
+	bool handleFeatureMessage( ComputerControlInterface::Pointer computerControlInterface,
+							   const FeatureMessage& message ) override;
+
+	bool handleFeatureMessageFromWorker( VeyonServerInterface& server, const FeatureMessage& message ) override;
+
 	bool handleFeatureMessage( VeyonWorkerInterface& worker, const FeatureMessage& message ) override;
 
 	bool isFeatureActive( VeyonServerInterface& server, Feature::Uid featureUid ) const override;
@@ -143,7 +152,8 @@ private:
 		SetCalling,		// worker -> server
 		CallState,		// server -> worker, server -> Master
 		AnswerCall,		// Master -> server
-		SetCallsAllowed	// Master -> server
+		SetCallsAllowed,	// Master -> server
+		HubStatus		// hub worker -> teacher's server -> Veyon Master: connected students
 	};
 
 	// The LabAudioCalls plugin exchanges messages of the client feature with this plugin.
@@ -169,6 +179,8 @@ private:
 	void setGroupFocus( int groupId, bool teacherTalks );
 	void endGroupWork();
 	void publishGroups();
+	void reportHubStatus();
+	void updateConnectionStatus();
 	void startClient( const ComputerControlInterface::Pointer& student, const QByteArray& token, int roles,
 					  const QStringList& groupMembers = {} );
 	void showTeacherPanel( VeyonMasterInterface& master, const Feature& feature );
@@ -214,8 +226,16 @@ private:
 	bool m_recordGroups{false};
 	QString m_conversationLabel;
 
+	// connection status (Veyon Master): students of the current mode, those connected to the hub
+	ComputerControlInterfaceList m_modeStudents;
+	QSet<QString> m_connectedTags;
+
+	// teacher's Veyon Server: the Master that started the hub receives its status
+	MessageContext m_hubMasterContext;
+
 	// worker processes
 	VeyonWorkerInterface* m_worker{nullptr};
+	QTimer m_hubStatusTimer;
 	LabAudioConfiguration m_configuration;
 
 	LabAudioHub* m_hub{nullptr};

@@ -157,6 +157,35 @@ bool handleSpace( LabAudioMicControls* mic, QKeyEvent* event, bool pressed )
 }
 
 // "● Record" toggle and "Recordings…" (opens the folder) side by side.
+// "● 28 of 30 students connected – waiting for: Anna, Ben" (orange) or "✔ All 30 students connected" (green).
+void showConnectionStatus( QLabel* label, int connected, int total, const QStringList& waiting )
+{
+	if( total <= 0 )
+	{
+		label->hide();
+		return;
+	}
+	if( connected >= total )
+	{
+		label->setText( total == 1 ? QObject::tr( "✔ The student is connected" )
+								   : QObject::tr( "✔ All %1 students connected" ).arg( total ) );
+		label->setStyleSheet( QStringLiteral( "color: #16a34a; font-weight: bold;" ) );
+	}
+	else
+	{
+		constexpr int MaxNames = 5;
+		auto names = QStringList( waiting.mid( 0, MaxNames ) ).join( QStringLiteral( ", " ) );
+		if( waiting.size() > MaxNames )
+		{
+			names += QObject::tr( " and %n more", nullptr, int( waiting.size() ) - MaxNames );
+		}
+		label->setText( QObject::tr( "⏳ %1 of %2 students connected – waiting for: %3" )
+							.arg( connected ).arg( total ).arg( names ) );
+		label->setStyleSheet( QStringLiteral( "color: #d97706; font-weight: bold;" ) );
+	}
+	label->show();
+}
+
 QHBoxLayout* recordRow( QWidget* parent, QPushButton*& record, const QString& text, const QString& toolTip,
 					   const std::function<void( bool )>& toggled, const std::function<void()>& openFolder )
 {
@@ -252,6 +281,7 @@ LabAudioTeacherPanel::LabAudioTeacherPanel( QWidget* parent ) :
 	QWidget( parent, Qt::Tool | Qt::CustomizeWindowHint | Qt::WindowTitleHint ),
 	m_mode( new QLabel( this ) ),
 	m_hint( new QLabel( this ) ),
+	m_connection( new QLabel( this ) ),
 	m_mic( new LabAudioMicControls( this ) )
 {
 	setWindowTitle( tr( "Lab audio" ) );
@@ -260,7 +290,10 @@ LabAudioTeacherPanel::LabAudioTeacherPanel( QWidget* parent ) :
 	m_mode->setWordWrap( true );
 	m_hint->setWordWrap( true );
 	m_hint->setEnabled( false );
+	m_connection->setWordWrap( true );
+	m_connection->hide();
 	layout->addWidget( m_mode );
+	layout->addWidget( m_connection );
 	layout->addWidget( m_mic );
 	layout->addLayout( recordRow( this, m_record, tr( "● Record" ),
 								  tr( "Record this conversation to a file on this computer. The students see that "
@@ -268,6 +301,14 @@ LabAudioTeacherPanel::LabAudioTeacherPanel( QWidget* parent ) :
 								  [this]( bool record ) { Q_EMIT recordToggled( record ); },
 								  [this]() { Q_EMIT openRecordingsRequested(); } ) );
 	layout->addWidget( m_hint );
+}
+
+
+
+void LabAudioTeacherPanel::setConnectionStatus( int connected, int total, const QStringList& waiting )
+{
+	showConnectionStatus( m_connection, connected, total, waiting );
+	adjustSize();
 }
 
 
@@ -337,6 +378,7 @@ LabAudioGroupPanel::LabAudioGroupPanel( QWidget* parent ) :
 	QWidget( parent, Qt::Tool | Qt::CustomizeWindowHint | Qt::WindowTitleHint ),
 	m_state( new QLabel( this ) ),
 	m_grid( new QGridLayout ),
+	m_connection( new QLabel( this ) ),
 	m_mic( new LabAudioMicControls( this ) )
 {
 	setWindowTitle( tr( "Group work" ) );
@@ -344,7 +386,10 @@ LabAudioGroupPanel::LabAudioGroupPanel( QWidget* parent ) :
 
 	auto layout = new QVBoxLayout( this );
 	m_state->setWordWrap( true );
+	m_connection->setWordWrap( true );
+	m_connection->hide();
 	layout->addWidget( m_state );
+	layout->addWidget( m_connection );
 	layout->addLayout( m_grid );
 	m_mic->setToolTip( tr( "Your microphone while you talk with a group" ) );
 	layout->addWidget( m_mic );
@@ -420,8 +465,9 @@ void LabAudioGroupPanel::setFocus( int groupId, bool talking )
 	}
 	if( m_focusGroup <= 0 )
 	{
-		m_state->setText( tr( "%n group(s) are talking. Choose a group to listen to or to join.", nullptr,
-							  int( m_rows.size() ) ) );
+		m_state->setText( m_rows.size() == 1
+							  ? tr( "1 group is talking. Choose a group to listen to or to join." )
+							  : tr( "%1 groups are talking. Choose a group to listen to or to join." ).arg( m_rows.size() ) );
 	}
 	else if( m_talking )
 	{
@@ -431,6 +477,14 @@ void LabAudioGroupPanel::setFocus( int groupId, bool talking )
 	{
 		m_state->setText( tr( "You are listening to group %1." ).arg( m_focusGroup ) );
 	}
+}
+
+
+
+void LabAudioGroupPanel::setConnectionStatus( int connected, int total, const QStringList& waiting )
+{
+	showConnectionStatus( m_connection, connected, total, waiting );
+	adjustSize();
 }
 
 

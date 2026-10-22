@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include <QElapsedTimer>
 #include <QTimer>
 #include <QWidget>
 
@@ -79,7 +80,7 @@ class LabAudioClient : public QObject
 {
 	Q_OBJECT
 public:
-	// hosts: addresses of the teacher's computer, tried in order (the first one is the preferred route).
+	// hosts: addresses of the teacher's computer, all tried at once (the first that answers is used).
 	// groupMembers: names of the other students in the group (group work only).
 	LabAudioClient( const QStringList& hosts, int port, const QByteArray& token, quint8 roles,
 					const QStringList& groupMembers = {}, QObject* parent = nullptr );
@@ -93,11 +94,16 @@ public:
 	{
 		m_bitRate = bitRate;
 	}
+	// Identifies this student to the teacher (connection status); sent encrypted in the Auth frame.
+	void setTag( const QString& tag )
+	{
+		m_tag = tag;
+	}
 	~LabAudioClient() override;
 
 	static constexpr int ReconnectIntervalMs = 2000;
-	static constexpr int NextAddressDelayMs = 200;
-	static constexpr int ConnectTimeoutMs = 3000;
+	static constexpr int AttemptIntervalMs = 500;	// new connection attempt to every address
+	static constexpr int SlowConnectMs = 5000;		// then tell the student what is wrong
 
 Q_SIGNALS:
 	void audioReceived( int bytes );
@@ -106,6 +112,9 @@ Q_SIGNALS:
 
 private:
 	void connectToHub();
+	void retryAttempts();
+	void dropAttempts();
+	void onAttemptConnected( QTcpSocket* socket );
 	void onConnected();
 	void onReadyRead();
 	void onDisconnected();
@@ -116,15 +125,15 @@ private:
 	void send( LabAudioProtocol::FrameType type, const QByteArray& payload );
 
 	QStringList m_hosts;
-	int m_hostIndex{0};
-	bool m_attemptActive{false};
-	bool m_wasConnected{false};
-	QString m_failReason;
-	QTimer m_connectTimer;
+	QList<QTcpSocket*> m_attempts;	// one per address while connecting
+	QTimer m_attemptTimer;
+	QElapsedTimer m_attemptClock;
+	QString m_lastError;
+	bool m_rejected{false};
 	int m_port;
 	QByteArray m_token;
 	quint8 m_roles;
-	QTcpSocket* m_socket;
+	QTcpSocket* m_socket{nullptr};	// the connection in use
 	LabAudioProtocol::FrameReader m_reader;
 	LabAudioSession m_session;
 	QByteArray m_clientNonce;
@@ -132,6 +141,7 @@ private:
 	bool m_accepted{false};
 	quint32 m_sequence{0};
 	int m_bitRate{32000};
+	QString m_tag;
 	LabAudioCapture* m_capture{nullptr};
 	LabAudioPlayback* m_playback{nullptr};
 	LabAudioIndicator* m_indicator;

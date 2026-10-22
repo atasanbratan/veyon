@@ -99,6 +99,8 @@ public:
 	// Listening only: the teacher's microphone is not used.
 	void setMicAvailable( bool available );
 	void setRecording( bool recording );
+	// How many of the students are connected to the teacher's audio, and who is still missing.
+	void setConnectionStatus( int connected, int total, const QStringList& waiting );
 	LabAudioMicControls* micControls() const
 	{
 		return m_mic;
@@ -116,6 +118,7 @@ protected:
 private:
 	QLabel* m_mode;
 	QLabel* m_hint;
+	QLabel* m_connection;
 	LabAudioMicControls* m_mic;
 	QPushButton* m_record;
 };
@@ -136,6 +139,7 @@ public:
 	void setGroups( const QList<QStringList>& groups );
 	void setFocus( int groupId, bool talking );
 	void setRecording( bool recording );
+	void setConnectionStatus( int connected, int total, const QStringList& waiting );
 
 Q_SIGNALS:
 	// groupId < 0: stop listening/talking
@@ -159,6 +163,7 @@ private:
 
 	QLabel* m_state;
 	QGridLayout* m_grid;
+	QLabel* m_connection;
 	LabAudioMicControls* m_mic;
 	QPushButton* m_record;
 	QList<Row> m_rows;

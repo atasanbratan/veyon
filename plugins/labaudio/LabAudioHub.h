@@ -64,6 +64,8 @@ public:
 	// group id = that group (a changed label starts a new file).
 	void setRecording( bool conversation, bool groups, const QHash<int, QString>& labels );
 	QStringList recordingPaths() const;
+	// Tags of the authenticated students (their Veyon computer uids), for the teacher's status display.
+	QStringList connectedTags() const;
 
 	static constexpr int MaxClients = 100;
 	static constexpr qint64 MaxQueuedBytes = 64 * 1024;	// drop audio to a client that falls behind
@@ -75,6 +77,7 @@ Q_SIGNALS:
 	void studentPacketReceived( int clientId );
 	void peerPacketForwarded( int sourceId, int receivers );
 	void recordingChanged();
+	void connectedClientsChanged();
 
 private:
 	struct Client
@@ -87,12 +90,13 @@ private:
 		QByteArray token;
 		int group{ClassGroup};
 		LabAudioSession session;	// ready after the hello; authenticated after the Auth frame
+		QString tag;
 	};
 
 	void acceptConnections();
 	void readClient( int id );
 	void handleHello( int id, const QByteArray& payload );
-	void handleAuth( int id, quint8 roles );
+	void handleAuth( int id, quint8 roles, const QString& tag );
 	void sendToClient( Client& client, LabAudioProtocol::FrameType type, const QByteArray& payload );
 	void dropClient( int id );
 	void updateAudio();

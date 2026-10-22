@@ -435,12 +435,12 @@ void LabAudioHub::readClient( int id )
 
 		if( client.authenticated == false )
 		{
-			if( type != FrameType::Auth || payload.size() != 1 )
+			if( type != FrameType::Auth || payload.isEmpty() || payload.size() > 1 + MaxTagBytes )
 			{
 				dropClient( id );
 				return;
 			}
-			handleAuth( id, quint8( payload.at( 0 ) ) );
+			handleAuth( id, quint8( payload.at( 0 ) ), QString::fromUtf8( payload.mid( 1 ) ) );
 			continue;
 		}
 
@@ -535,9 +535,10 @@ void LabAudioHub::handleHello( int id, const QByteArray& payload )
 
 
 
-void LabAudioHub::handleAuth( int id, quint8 roles )
+void LabAudioHub::handleAuth( int id, quint8 roles, const QString& tag )
 {
 	auto& client = m_clients[id];
+	client.tag = tag;
 	client.roles = roles & ( ReceiveTeacher | SendMicrophone | ReceivePeers );
 	client.authenticated = true;
 	client.helloTimer->stop();
@@ -545,6 +546,22 @@ void LabAudioHub::handleAuth( int id, quint8 roles )
 			<< "with roles" << client.roles;
 	sendStatus( id );
 	updateAudio();
+	Q_EMIT connectedClientsChanged();
+}
+
+
+
+QStringList LabAudioHub::connectedTags() const
+{
+	QStringList tags;
+	for( const auto& client : m_clients )
+	{
+		if( client.authenticated && client.tag.isEmpty() == false )
+		{
+			tags.append( client.tag );
+		}
+	}
+	return tags;
 }
 
 
@@ -568,6 +585,10 @@ void LabAudioHub::dropClient( int id )
 	}
 	auto client = it.value();
 	m_clients.erase( it );
+	if( client.authenticated )
+	{
+		Q_EMIT connectedClientsChanged();
+	}
 	if( client.helloTimer )
 	{
 		client.helloTimer->deleteLater();

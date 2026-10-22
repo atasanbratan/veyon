@@ -106,6 +106,9 @@ LabAudioFeaturePlugin::LabAudioFeaturePlugin( QObject* parent ) :
 {
 	Q_ASSERT( m_clientFeature.uid() == LabAudioCallProtocol::LabAudioClientFeatureUid );
 	m_hubKeepAliveTimer.setInterval( HubKeepAliveIntervalMs );
+	m_hubStatusTimer.setSingleShot( true );
+	m_hubStatusTimer.setInterval( 150 );
+	connect( &m_hubStatusTimer, &QTimer::timeout, this, &LabAudioFeaturePlugin::reportHubStatus );
 	connect( &m_hubKeepAliveTimer, &QTimer::timeout, this, &LabAudioFeaturePlugin::sendHubCommand );
 }
 
@@ -174,7 +177,8 @@ void LabAudioFeaturePlugin::startClient( const ComputerControlInterface::Pointer
 					{ { argToString(Argument::Token), token },
 					  { argToString(Argument::Roles), roles },
 					  { argToString(Argument::GroupMembers), groupMembers },
-					  { argToString(Argument::StudentName), studentLabel( student ) } },
+					  { argToString(Argument::StudentName), studentLabel( student ) },
+					  { argToString(Argument::ClientTag), student->computer().networkObjectUid().toString() } },
 					{ student } );
 }
 
@@ -344,7 +348,9 @@ bool LabAudioFeaturePlugin::controlFeature( Feature::Uid featureUid, Operation o
 													  .toStringList() )
 									.addArgument( Argument::StudentName,
 												  arguments.value( argToString(Argument::StudentName), QString() ).toString() )
-									.addArgument( Argument::BitRate, LabAudioQuality::bitRate( m_configuration.audioQuality() ) ),
+									.addArgument( Argument::BitRate, LabAudioQuality::bitRate( m_configuration.audioQuality() ) )
+									.addArgument( Argument::ClientTag,
+												  arguments.value( argToString(Argument::ClientTag), QString() ).toString() ),
 								computerControlInterfaces );
 			return true;
 		}
@@ -478,6 +484,9 @@ bool LabAudioFeaturePlugin::startGroupWork( VeyonMasterInterface& master,
 	}
 	m_groupPanel->setGroups( groupNames );
 	m_groupPanel->setFocus( m_focusGroup, m_teacherTalks );
+	m_modeStudents = m_groupStudents;
+	m_connectedTags.clear();
+	updateConnectionStatus();
 	m_groupPanel->show();
 	m_groupPanel->raise();
 	return true;
@@ -630,6 +639,9 @@ bool LabAudioFeaturePlugin::startMode( VeyonMasterInterface& master, const Featu
 	}
 	++m_activeModes;
 	showTeacherPanel( master, feature );
+	m_modeStudents = targets;
+	m_connectedTags.clear();
+	updateConnectionStatus();
 	return true;
 }
 
@@ -659,6 +671,8 @@ bool LabAudioFeaturePlugin::stopFeature( VeyonMasterInterface& master, const Fea
 			// Recording never carries over into the next mode without the teacher asking.
 			m_recordConversation = false;
 			m_recordGroups = false;
+			m_modeStudents.clear();
+			m_connectedTags.clear();
 			controlFeature( m_hubFeature.uid(), Operation::Stop, {},
 							{ master.localSessionControlInterface().weakPointer() } );
 		}
@@ -680,6 +694,11 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonServerInterface& server, 
 			workers.isWorkerRunning( m_hubFeature.uid() ) == false )
 		{
 			return true;
+		}
+		if( message.command<FeatureCommand>() == FeatureCommand::StartHub )
+		{
+			// The hub's status reports go back to the Veyon Master that keeps it running.
+			m_hubMasterContext = messageContext;
 		}
 		// Runs as the logged-in user so the teacher's own headset is used.
 		workers.sendMessageToUnmanagedSessionWorker( message );
@@ -738,6 +757,74 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonServerInterface& server, 
 
 
 
+void LabAudioFeaturePlugin::reportHubStatus()
+{
+	if( m_worker && m_hub )
+	{
+		m_worker->sendFeatureMessageReply( FeatureMessage{ m_hubFeature.uid(), FeatureCommand::HubStatus }
+											   .addArgument( Argument::ConnectedClients, m_hub->connectedTags() ) );
+	}
+}
+
+
+
+bool LabAudioFeaturePlugin::handleFeatureMessageFromWorker( VeyonServerInterface& server, const FeatureMessage& message )
+{
+	if( message.featureUid() == m_hubFeature.uid() && message.command<FeatureCommand>() == FeatureCommand::HubStatus )
+	{
+		// Without a Master context (e.g. the server restarted) the reply is dropped; the next keep-alive sets it.
+		server.sendFeatureMessageReply( m_hubMasterContext, message );
+		return true;
+	}
+	return false;
+}
+
+
+
+bool LabAudioFeaturePlugin::handleFeatureMessage( ComputerControlInterface::Pointer computerControlInterface,
+												  const FeatureMessage& message )
+{
+	Q_UNUSED(computerControlInterface)
+	if( message.featureUid() != m_hubFeature.uid() || message.command<FeatureCommand>() != FeatureCommand::HubStatus )
+	{
+		return false;
+	}
+	const auto tags = message.argument( Argument::ConnectedClients ).toStringList();
+	m_connectedTags = QSet<QString>( tags.begin(), tags.end() );
+	updateConnectionStatus();
+	return true;
+}
+
+
+
+void LabAudioFeaturePlugin::updateConnectionStatus()
+{
+	int connected = 0;
+	QStringList waiting;
+	for( const auto& student : std::as_const( m_modeStudents ) )
+	{
+		if( m_connectedTags.contains( student->computer().networkObjectUid().toString() ) )
+		{
+			++connected;
+		}
+		else
+		{
+			waiting.append( studentName( student ) );
+		}
+	}
+	const auto total = int( m_modeStudents.size() );
+	if( m_teacherPanel )
+	{
+		m_teacherPanel->setConnectionStatus( connected, total, waiting );
+	}
+	if( m_groupPanel )
+	{
+		m_groupPanel->setConnectionStatus( connected, total, waiting );
+	}
+}
+
+
+
 bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonWorkerInterface& worker, const FeatureMessage& message )
 {
 	m_worker = &worker;
@@ -753,6 +840,8 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonWorkerInterface& worker, 
 				vWarning() << "LabAudio StartHub: argument keys" << message.arguments().keys();
 				m_hub = new LabAudioHub( message.argument( Argument::HubPort ).toInt(),
 										 message.argument( Argument::Token ).toByteArray() );
+				// Students connect within a short time: report the new state once they settle.
+				connect( m_hub, &LabAudioHub::connectedClientsChanged, this, [this]() { m_hubStatusTimer.start(); } );
 			}
 			else
 			{
@@ -782,6 +871,8 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonWorkerInterface& worker, 
 			}
 			m_hub->setRecording( message.argument( Argument::RecordConversation ).toBool(),
 								 message.argument( Argument::RecordGroups ).toBool(), labels );
+			// Also with every keep-alive, so a restarted Veyon Master gets the current state.
+			reportHubStatus();
 			return true;
 		}
 		case FeatureCommand::StopHub:
@@ -828,6 +919,7 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonWorkerInterface& worker, 
 			{
 				m_client->setBitRate( message.argument( Argument::BitRate ).toInt() );
 			}
+			m_client->setTag( message.argument( Argument::ClientTag ).toString() );
 			connect( m_client->indicator(), &LabAudioIndicator::callToggled, this, [this]( bool calling ) {
 				sendCalling( calling );
 			} );

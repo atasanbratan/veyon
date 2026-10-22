@@ -89,9 +89,19 @@ Veyon Master (teacher)                    Veyon Server (each PC)            Work
 - Control messages use Veyon's existing authenticated, encrypted Master↔Server channel (same as Demo mode).
 - **Hub** (`LabAudioHub`): `QTcpServer` in an unmanaged session worker on the teacher PC. Captures the teacher's default
   microphone only while a client needs it; plays/mixes students' microphones only while a client sends.
-- **Client** (`LabAudioClient`): unmanaged session worker on each student PC; connects to the master computer's address
-  (taken from the peer address of the control connection), reconnects every 2 s, shows a non-closable notice
-  ("The teacher is speaking" / "The teacher can hear your microphone" + level meter) while active.
+- **Client** (`LabAudioClient`): unmanaged session worker on each student PC; shows a non-closable notice ("The teacher
+  is speaking" / "The teacher can hear your microphone" + level meter) while active. It connects to **all** addresses of
+  the teacher's computer at once (the peer address of the control connection first, then every IPv4 address the Master
+  reports) and uses the first that answers, with a fresh attempt every 0.5 s: hub and students start at the same time,
+  and while the hub is not listening yet, Windows keeps a refused connection pending for seconds instead of reporting
+  it. Trying the addresses one after another with a timeout cost 4–5 s per mode start; now a student connects about
+  0.5 s after the hub is up. After a lost connection it reconnects after 2 s.
+- **Connection status for the teacher**: the Master gives each client its computer uid (`ClientTag`), which the client
+  sends inside the encrypted Auth frame. The hub reports the connected tags (`HubStatus`) to the teacher's Veyon Server,
+  which forwards them to the Master that keeps the hub running (it remembers that Master's connection from the
+  StartHub keep-alive; Master's own connection gets no screen updates, so `sendAsyncFeatureMessages` cannot be used).
+  The teacher panel and the group panel show "⏳ 26 of 30 students connected – waiting for: …" or "✔ All 30 students
+  connected".
 - Workers run **as the logged-in user** so Windows' default headset and microphone privacy settings apply.
 
 ## Audio

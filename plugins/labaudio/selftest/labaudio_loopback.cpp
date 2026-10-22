@@ -81,8 +81,9 @@ int main( int argc, char** argv )
 	QTimer::singleShot( seconds * 1000, &app, []() { QCoreApplication::exit( 0 ); } );
 	app.exec();
 
-	// 50 packets per second, minus the connect timeout spent on the deliberately unreachable first address.
-	const int expected = ( seconds - LabAudioClient::ConnectTimeoutMs / 1000 ) * 50;
+	// 50 packets per second, minus about a second for starting the devices (the unreachable first address
+	// costs nothing: all addresses are tried at once).
+	const int expected = ( seconds - 1 ) * 50;
 	int failures = 0;
 	auto check = [&]( bool ok, const char* what ) { std::printf( "%s  %s\n", ok ? "PASS" : "FAIL", what ); failures += !ok; };
 	std::printf( "teacher packets sent %d, student received %d, hub received from student %d (expected ~%d each)\n",

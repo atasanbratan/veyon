@@ -76,7 +76,7 @@ public:
 							   session.init( token, clientNonce, payload.mid( 1 ), LabAudioSession::Role::Client );
 					if( accepted )
 					{
-						socket.write( session.seal( FrameType::Auth, QByteArray( 1, char( roles ) ) ) );
+						socket.write( session.seal( FrameType::Auth, QByteArray( QByteArray( 1, char( roles ) ) + tag ) ) );
 					}
 					continue;
 				}
@@ -114,6 +114,7 @@ public:
 	QByteArray clientNonce;
 	int notAuthentic{0};
 	QByteArray raw;	// everything received, as an eavesdropper on the network would see it
+	QByteArray tag;	// sent in the Auth frame, like a Veyon computer uid
 	bool accepted{false};
 	bool disconnected{false};
 	QList<int> peerSources;
@@ -145,6 +146,7 @@ int main( int argc, char** argv )
 						   { QStringLiteral( "Carla Diaz" ), QStringLiteral( "Dan Ivanov" ) },
 						   { QStringLiteral( "Emre Yilmaz" ), QStringLiteral( "PC-07" ), QStringLiteral( "Gulnara Abenova" ) } } );
 		panel.setFocus( 2, false );
+		panel.setConnectionStatus( 7, 7, {} );
 		panel.show();
 		wait( 200 );
 		panel.grab().save( dir + QStringLiteral( "/group-panel.png" ) );
@@ -152,6 +154,8 @@ int main( int argc, char** argv )
 		LabAudioTeacherPanel teacher;
 		teacher.setMode( QStringLiteral( "You are speaking to the students." ),
 						 QStringLiteral( "To stop, click \"Speak to students\" in the toolbar again." ) );
+		teacher.setConnectionStatus( 26, 30, { QStringLiteral( "Anna Petrova" ), QStringLiteral( "PC-07" ),
+											 QStringLiteral( "Ben Koch" ), QStringLiteral( "Dan Ivanov" ) } );
 		teacher.show();
 		wait( 200 );
 		teacher.grab().save( dir + QStringLiteral( "/teacher-panel.png" ) );
@@ -218,6 +222,13 @@ int main( int argc, char** argv )
 	FakeStudent carla( port, group2, groupRoles );
 	FakeStudent dan( port, group2, groupRoles );
 	FakeStudent classStudent( port, classToken, ReceiveTeacher );
+	anna.tag = "pc-anna";
+	ben.tag = "pc-ben";
+	carla.tag = "pc-carla";
+	dan.tag = "pc-dan";
+	classStudent.tag = "pc-emre";
+	int connectionReports = 0;
+	QObject::connect( &hub, &LabAudioHub::connectedClientsChanged, [&]() { ++connectionReports; } );
 	FakeStudent intruder( port, QByteArrayLiteral( "guessed-token-0123456789" ), groupRoles );
 	// Knows group 1's public key id (e.g. sniffed from a Hello) but not its token.
 	FakeStudent forger( port, QByteArrayLiteral( "guessed-token-0123456789" ), groupRoles, group1 );
@@ -232,6 +243,10 @@ int main( int argc, char** argv )
 	}
 	wait( 200 );
 	CHECK( allAccepted(), "group members and class student accepted" );
+	auto connectedTags = hub.connectedTags();
+	connectedTags.sort();
+	CHECK( connectedTags == QStringList( { "pc-anna", "pc-ben", "pc-carla", "pc-dan", "pc-emre" } ) && connectionReports >= 5,
+		   "hub knows which computers are connected (for the teacher's status)" );
 	std::printf( "      accepted: anna %d ben %d carla %d dan %d class %d\n", anna.accepted, ben.accepted,
 				 carla.accepted, dan.accepted, classStudent.accepted );
 	CHECK( intruder.accepted == false, "unknown group token refused" );
@@ -297,6 +312,29 @@ int main( int argc, char** argv )
 	const auto closedData = closed.readAll();
 	CHECK( opened && hub.recordingPaths().isEmpty() && closedData.startsWith( "OggS" ) && closedData.contains( "OpusHead" ),
 		   "stopping the recording leaves complete Ogg Opus files" );
+
+	// Veyon starts the hub and the students at the same moment, so students usually come first. A real
+	// client must connect right after the hub is up, even with a second teacher address that would time out.
+	{
+		const int latePort = 11597;
+		const QByteArray lateToken = QByteArrayLiteral( "late-hub-token-0123456789" );
+		LabAudioClient early( { QStringLiteral( "127.0.0.1" ), QStringLiteral( "192.0.2.1" ) }, latePort, lateToken,
+							  ReceiveTeacher );
+		early.setTag( QStringLiteral( "pc-early" ) );
+		// Long enough for a first "refused" to come back (Windows retries a refused connection for about 2 s).
+		wait( 3000 );
+		LabAudioHub lateHub( latePort, lateToken );
+		QElapsedTimer sinceHubStart;
+		sinceHubStart.start();
+		while( lateHub.connectedTags().isEmpty() && sinceHubStart.elapsed() < 8000 )
+		{
+			wait( 10 );
+		}
+		const auto delay = sinceHubStart.elapsed();
+		std::printf( "      student connected %lld ms after the hub started\n", delay );
+		CHECK( lateHub.connectedTags() == QStringList( { QStringLiteral( "pc-early" ) } ) && delay < 1000,
+			   "a student started before the hub connects within a second of the hub starting" );
+	}
 
 	std::printf( failures ? "\n%d FAILED\n" : "\nALL PASSED\n", failures );
 	return failures ? 1 : 0;

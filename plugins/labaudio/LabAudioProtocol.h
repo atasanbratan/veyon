@@ -45,6 +45,7 @@ static constexpr int FrameSamples = 960;			// 20 ms at 48 kHz
 static constexpr int MaxFrameBytes = 4000;			// upper bound for one Opus packet
 static constexpr int MaxPayload = 8192;
 static constexpr int HelloTimeoutMs = 5000;
+static constexpr int MaxTagBytes = 64;			// client tag in the Auth frame (Veyon computer uid)
 
 enum class FrameType : quint8
 {
@@ -55,7 +56,7 @@ enum class FrameType : quint8
 	Status = 5,		// hub -> client: u8 StatusFlag bits (what the teacher does with the client's group)
 	PeerAudio = 6,	// hub -> client: u32 source id, u32 sequence, Opus packet of a group member
 	// 7 was CallTeacher; calls now travel through Veyon (LabAudioCallBoard), not the audio connection.
-	Auth = 8,		// client -> hub, first encrypted frame: u8 role flags
+	Auth = 8,		// client -> hub, first encrypted frame: u8 role flags [, UTF-8 client tag]
 	Encrypted = 16	// AES-256-GCM of u8 inner type + inner payload, followed by the 16 byte tag
 };
 

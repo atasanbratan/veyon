@@ -261,7 +261,6 @@ LabAudioClient::LabAudioClient( const QStringList& hosts, int port, const QByteA
 	m_port( port ),
 	m_token( token ),
 	m_roles( roles ),
-	m_socket( new QTcpSocket( this ) ),
 	m_indicator( new LabAudioIndicator( roles, groupMembers ) )
 {
 	connect( this, &LabAudioClient::teacherStatusChanged, m_indicator, &LabAudioIndicator::setTeacherStatus );
@@ -271,30 +270,12 @@ LabAudioClient::LabAudioClient( const QStringList& hosts, int port, const QByteA
 			m_playback->mixer().setGain( float( percent ) / 100.0f );
 		}
 	} );
-	connect( m_socket, &QTcpSocket::connected, this, &LabAudioClient::onConnected );
-	connect( m_socket, &QTcpSocket::readyRead, this, &LabAudioClient::onReadyRead );
-	connect( m_socket, &QTcpSocket::disconnected, this, &LabAudioClient::onDisconnected );
-	connect( m_socket, &QTcpSocket::errorOccurred, this, [this]( QAbstractSocket::SocketError ) {
-		if( m_socket->state() != QAbstractSocket::ConnectedState )
-		{
-			onDisconnected();
-		}
-	} );
 
 	m_reconnectTimer.setSingleShot( true );
 	connect( &m_reconnectTimer, &QTimer::timeout, this, &LabAudioClient::connectToHub );
 
-	// A firewall that silently drops packets would otherwise block each attempt for ~20 s.
-	m_connectTimer.setSingleShot( true );
-	m_connectTimer.setInterval( ConnectTimeoutMs );
-	connect( &m_connectTimer, &QTimer::timeout, this, [this]() {
-		if( m_socket->state() != QAbstractSocket::ConnectedState )
-		{
-			m_failReason = tr( "no answer within %1 seconds (blocked by a firewall?)" ).arg( ConnectTimeoutMs / 1000 );
-			m_socket->abort();
-			onDisconnected();
-		}
-	} );
+	m_attemptTimer.setInterval( AttemptIntervalMs );
+	connect( &m_attemptTimer, &QTimer::timeout, this, &LabAudioClient::retryAttempts );
 
 	m_hosts.removeAll( QString() );
 	m_hosts.removeDuplicates();
@@ -312,14 +293,18 @@ LabAudioClient::LabAudioClient( const QStringList& hosts, int port, const QByteA
 LabAudioClient::~LabAudioClient()
 {
 	m_reconnectTimer.stop();
-	m_connectTimer.stop();
-	if( m_accepted && m_socket->state() == QAbstractSocket::ConnectedState )
+	m_attemptTimer.stop();
+	if( m_socket && m_accepted && m_socket->state() == QAbstractSocket::ConnectedState )
 	{
 		send( FrameType::Bye, {} );
 		m_socket->flush();
 	}
-	m_socket->disconnect( this );
-	m_socket->abort();
+	dropAttempts();
+	if( m_socket )
+	{
+		m_socket->disconnect( this );
+		m_socket->abort();
+	}
 	stopAudio();
 	delete m_indicator;
 }
@@ -328,33 +313,102 @@ LabAudioClient::~LabAudioClient()
 
 void LabAudioClient::connectToHub()
 {
-	if( m_socket->state() != QAbstractSocket::UnconnectedState )
+	if( m_socket || m_rejected )
 	{
 		return;
 	}
-	vDebug() << "LabAudio: connecting to" << currentHost() << m_port;
+	// Every address of the teacher's computer at once; the first that answers wins. A new attempt every
+	// AttemptIntervalMs: while the hub is still starting, Windows keeps a refused connection pending for
+	// seconds instead of reporting it, so waiting for each attempt would delay everybody.
+	vDebug() << "LabAudio: connecting to" << m_hosts << m_port;
 	m_reader = {};
 	m_accepted = false;
-	m_wasConnected = false;
-	m_failReason.clear();
-	m_attemptActive = true;
-	m_connectTimer.start();
-	m_socket->connectToHost( currentHost(), quint16( m_port ) );
+	m_lastError.clear();
+	m_attemptClock.start();
+	for( const auto& host : std::as_const( m_hosts ) )
+	{
+		auto socket = new QTcpSocket( this );
+		socket->setProperty( "labAudioHost", host );
+		connect( socket, &QTcpSocket::connected, this, [this, socket]() { onAttemptConnected( socket ); } );
+		connect( socket, &QTcpSocket::errorOccurred, this, [this, socket]( QAbstractSocket::SocketError ) {
+			m_lastError = QStringLiteral( "%1: %2" ).arg( socket->property( "labAudioHost" ).toString(), socket->errorString() );
+		} );
+		m_attempts.append( socket );
+		socket->connectToHost( host, quint16( m_port ) );
+	}
+	m_attemptTimer.start();
+}
+
+
+
+void LabAudioClient::retryAttempts()
+{
+	for( const auto socket : std::as_const( m_attempts ) )
+	{
+		if( socket->state() != QAbstractSocket::ConnectedState )
+		{
+			socket->abort();
+			socket->connectToHost( socket->property( "labAudioHost" ).toString(), quint16( m_port ) );
+		}
+	}
+	if( m_attemptClock.elapsed() > SlowConnectMs )
+	{
+		m_indicator->setStatus( tr( "Cannot reach the teacher's computer (%1, port %2)%3. Still trying…" )
+									.arg( m_hosts.join( QStringLiteral( ", " ) ) ).arg( m_port )
+									.arg( m_lastError.isEmpty() ? QString() : QStringLiteral( " – " ) + m_lastError ) );
+	}
+}
+
+
+
+void LabAudioClient::dropAttempts()
+{
+	for( const auto socket : std::as_const( m_attempts ) )
+	{
+		socket->disconnect( this );
+		socket->abort();
+		socket->deleteLater();
+	}
+	m_attempts.clear();
+}
+
+
+
+void LabAudioClient::onAttemptConnected( QTcpSocket* socket )
+{
+	if( m_socket )
+	{
+		return;
+	}
+	m_attempts.removeOne( socket );
+	m_attemptTimer.stop();
+	dropAttempts();
+
+	m_socket = socket;
+	m_socket->disconnect( this );
+	connect( m_socket, &QTcpSocket::readyRead, this, &LabAudioClient::onReadyRead );
+	connect( m_socket, &QTcpSocket::disconnected, this, &LabAudioClient::onDisconnected );
+	connect( m_socket, &QTcpSocket::errorOccurred, this, [this]( QAbstractSocket::SocketError ) {
+		if( m_socket && m_socket->state() != QAbstractSocket::ConnectedState )
+		{
+			onDisconnected();
+		}
+	} );
+	vInfo() << "LabAudio: connected to" << currentHost() << m_port << "after" << m_attemptClock.elapsed() << "ms";
+	onConnected();
 }
 
 
 
 QString LabAudioClient::currentHost() const
 {
-	return m_hosts.value( m_hostIndex % qMax( 1, int( m_hosts.size() ) ) );
+	return m_socket ? m_socket->property( "labAudioHost" ).toString() : m_hosts.value( 0 );
 }
 
 
 
 void LabAudioClient::onConnected()
 {
-	m_connectTimer.stop();
-	m_wasConnected = true;
 	m_socket->setSocketOption( QAbstractSocket::LowDelayOption, 1 );
 	// Names the token only by its key id; the token itself never leaves this computer.
 	m_session = {};
@@ -369,7 +423,7 @@ void LabAudioClient::onConnected()
 
 void LabAudioClient::send( FrameType type, const QByteArray& payload )
 {
-	if( m_session.isReady() && m_socket->state() == QAbstractSocket::ConnectedState )
+	if( m_socket && m_session.isReady() && m_socket->state() == QAbstractSocket::ConnectedState )
 	{
 		m_socket->write( m_session.seal( type, payload ) );
 	}
@@ -391,8 +445,9 @@ void LabAudioClient::onReadyRead()
 				m_session.init( m_token, m_clientNonce, payload.mid( 1 ), LabAudioSession::Role::Client ) )
 			{
 				m_accepted = true;
-				// The first encrypted frame proves to the hub that this client knows the token.
-				send( FrameType::Auth, QByteArray( 1, char( m_roles ) ) );
+				// The first encrypted frame proves to the hub that this client knows the token. The tag tells
+				// the teacher which computer is connected.
+				send( FrameType::Auth, QByteArray( QByteArray( 1, char( m_roles ) ) + m_tag.toUtf8().left( MaxTagBytes ) ) );
 				startAudio();
 			}
 			else
@@ -402,9 +457,9 @@ void LabAudioClient::onReadyRead()
 				m_indicator->setStatus( tr( "The connection to the teacher was refused. Is the same Veyon version "
 											"installed on this computer and the teacher's computer?" ) );
 				// No automatic retry: the teacher has to start the audio mode again.
-				m_attemptActive = false;
-				m_connectTimer.stop();
+				m_rejected = true;
 				m_socket->abort();
+				onDisconnected();
 				return;
 			}
 			continue;
@@ -455,33 +510,31 @@ void LabAudioClient::onReadyRead()
 
 void LabAudioClient::onDisconnected()
 {
-	// errorOccurred, disconnected and the connect timeout can all report the same failed attempt.
-	if( m_attemptActive == false )
+	// errorOccurred and disconnected can both report the end of the same connection.
+	if( m_socket == nullptr )
 	{
 		return;
 	}
-	m_attemptActive = false;
-	m_connectTimer.stop();
+	const auto host = currentHost();
+	const auto reason = m_socket->errorString();
+	const bool wasAccepted = m_accepted;
+	m_socket->disconnect( this );
+	m_socket->abort();
+	m_socket->deleteLater();
+	m_socket = nullptr;
+	m_accepted = false;
 	stopAudio();
 
-	const auto host = currentHost();
-	const auto reason = m_failReason.isEmpty() ? m_socket->errorString() : m_failReason;
-	if( m_wasConnected && m_accepted )
+	if( m_rejected )
 	{
-		// The route worked: retry the same address after a pause.
-		vWarning() << "LabAudio: connection to" << host << m_port << "lost:" << reason;
-		m_indicator->setStatus( tr( "Connection to the teacher lost. Reconnecting…" ) );
-		m_reconnectTimer.start( ReconnectIntervalMs );
 		return;
 	}
-
-	vWarning() << "LabAudio: cannot reach the teacher's audio hub at" << host << m_port << "-" << reason;
-	m_indicator->setStatus( tr( "Cannot reach the teacher's computer (%1, port %2): %3. Retrying…" )
-								.arg( host ).arg( m_port ).arg( reason ) );
-	// Try the teacher's next address quickly; pause after a full round.
-	++m_hostIndex;
-	const bool roundComplete = ( m_hostIndex % int( m_hosts.size() ) ) == 0;
-	m_reconnectTimer.start( roundComplete ? ReconnectIntervalMs : NextAddressDelayMs );
+	if( wasAccepted )
+	{
+		vWarning() << "LabAudio: connection to" << host << m_port << "lost:" << reason;
+		m_indicator->setStatus( tr( "Connection to the teacher lost. Reconnecting…" ) );
+	}
+	m_reconnectTimer.start( ReconnectIntervalMs );
 }
 
 
@@ -527,7 +580,7 @@ void LabAudioClient::stopAudio()
 
 void LabAudioClient::sendPacket( const QByteArray& packet )
 {
-	if( m_accepted && m_socket->state() == QAbstractSocket::ConnectedState && m_socket->bytesToWrite() < 64 * 1024 )
+	if( m_socket && m_accepted && m_socket->state() == QAbstractSocket::ConnectedState && m_socket->bytesToWrite() < 64 * 1024 )
 	{
 		send( FrameType::Audio, audioPayload( m_sequence++, packet ) );
 	}
