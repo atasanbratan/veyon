@@ -37,8 +37,10 @@ class LabAudioCapture;
 class LabAudioPlayback;
 
 // Accepts student connections authenticated with the session token.
-// Sends the teacher's microphone to clients with ReceiveTeacher and plays (mixed) microphones of
-// clients with SendMicrophone on the teacher's headset.
+// Clients authenticated with the class token form group 0: they receive the teacher's microphone
+// (ReceiveTeacher) and are heard by the teacher (SendMicrophone).
+// Clients authenticated with a group token (group work) hear each other through the hub; the
+// teacher hears and/or talks to one group at a time (the focus group).
 class LabAudioHub : public QObject
 {
 	Q_OBJECT
@@ -48,13 +50,20 @@ public:
 
 	bool isListening() const;
 	void setToken( const QByteArray& token );
+	// group token -> group id (> 0); clients whose token is no longer valid are disconnected
+	void setGroups( const QHash<QByteArray, int>& groupTokens );
+	// focusGroup < 0: the teacher neither hears nor talks to any group
+	void setFocus( int focusGroup, bool teacherTalks );
 
 	static constexpr int MaxClients = 100;
 	static constexpr qint64 MaxQueuedBytes = 64 * 1024;	// drop audio to a client that falls behind
+	static constexpr int ClassGroup = 0;
+	static constexpr int NoGroup = -1;
 
 Q_SIGNALS:
 	void teacherPacketSent( int receivers );
 	void studentPacketReceived( int clientId );
+	void peerPacketForwarded( int sourceId, int receivers );
 
 private:
 	struct Client
@@ -64,6 +73,8 @@ private:
 		quint8 roles{0};
 		bool authenticated{false};
 		QTimer* helloTimer{nullptr};
+		QByteArray token;
+		int group{ClassGroup};
 	};
 
 	void acceptConnections();
@@ -72,9 +83,16 @@ private:
 	void dropClient( int id );
 	void updateAudio();
 	void sendTeacherPacket( const QByteArray& packet );
+	void forwardStudentAudio( int sourceId, const QByteArray& audioPayload );
+	void sendStatus( int id );
+	bool hearsTeacher( const Client& client ) const;
+	bool teacherHears( const Client& client ) const;
 
 	QTcpServer* m_server{nullptr};
 	QByteArray m_token;
+	QHash<QByteArray, int> m_groupTokens;
+	int m_focusGroup{NoGroup};
+	bool m_teacherTalks{false};
 	QHash<int, Client> m_clients;
 	int m_nextId{1};
 	quint32 m_sequence{0};

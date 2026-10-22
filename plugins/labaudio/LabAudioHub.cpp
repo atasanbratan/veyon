@@ -101,6 +101,111 @@ void LabAudioHub::setToken( const QByteArray& token )
 
 
 
+void LabAudioHub::setGroups( const QHash<QByteArray, int>& groupTokens )
+{
+	if( groupTokens == m_groupTokens )
+	{
+		return;
+	}
+	vWarning() << "LabAudio hub: group work with" << groupTokens.size() << "groups";
+	m_groupTokens = groupTokens;
+
+	// Regrouping or ending group work: members of old groups have to reconnect with their new token.
+	const auto ids = m_clients.keys();
+	for( const auto id : ids )
+	{
+		const auto client = m_clients.value( id );
+		if( client.authenticated && client.group != ClassGroup && m_groupTokens.value( client.token ) != client.group )
+		{
+			dropClient( id );
+		}
+	}
+	updateAudio();
+}
+
+
+
+void LabAudioHub::setFocus( int focusGroup, bool teacherTalks )
+{
+	if( focusGroup <= ClassGroup )
+	{
+		focusGroup = NoGroup;
+		teacherTalks = false;
+	}
+	if( focusGroup == m_focusGroup && teacherTalks == m_teacherTalks )
+	{
+		return;
+	}
+	const auto previousGroup = m_focusGroup;
+	m_focusGroup = focusGroup;
+	m_teacherTalks = teacherTalks;
+
+	const auto ids = m_clients.keys();
+	for( const auto id : ids )
+	{
+		const auto client = m_clients.value( id );
+		if( client.authenticated == false )
+		{
+			continue;
+		}
+		if( client.group == previousGroup || client.group == m_focusGroup )
+		{
+			sendStatus( id );
+		}
+		// Drop what was buffered for a group the teacher no longer hears.
+		if( m_playback && teacherHears( client ) == false )
+		{
+			m_playback->mixer().removeStream( id );
+		}
+	}
+	updateAudio();
+}
+
+
+
+bool LabAudioHub::hearsTeacher( const Client& client ) const
+{
+	if( client.authenticated == false || ( client.roles & ReceiveTeacher ) == 0 )
+	{
+		return false;
+	}
+	return client.group == ClassGroup || ( client.group == m_focusGroup && m_teacherTalks );
+}
+
+
+
+bool LabAudioHub::teacherHears( const Client& client ) const
+{
+	if( client.authenticated == false || ( client.roles & SendMicrophone ) == 0 )
+	{
+		return false;
+	}
+	return client.group == ClassGroup || client.group == m_focusGroup;
+}
+
+
+
+void LabAudioHub::sendStatus( int id )
+{
+	auto& client = m_clients[id];
+	if( client.socket.isNull() || client.group == ClassGroup )
+	{
+		return;
+	}
+	quint8 flags = 0;
+	if( client.group == m_focusGroup )
+	{
+		flags |= TeacherListening;
+		if( m_teacherTalks )
+		{
+			flags |= TeacherTalking;
+		}
+	}
+	client.socket->write( frame( FrameType::Status, QByteArray( 1, char( flags ) ) ) );
+}
+
+
+
 void LabAudioHub::acceptConnections()
 {
 	while( m_server->hasPendingConnections() )
@@ -163,11 +268,18 @@ void LabAudioHub::readClient( int id )
 		}
 
 		if( type == FrameType::Audio && ( client.roles & SendMicrophone ) && payload.size() > 4 &&
-			payload.size() <= 4 + MaxFrameBytes && m_playback )
+			payload.size() <= 4 + MaxFrameBytes )
 		{
-			const auto sequence = qFromBigEndian<quint32>( payload.constData() );
-			m_playback->mixer().addPacket( id, sequence, payload.mid( 4 ) );
-			Q_EMIT studentPacketReceived( id );
+			if( m_playback && teacherHears( client ) )
+			{
+				const auto sequence = qFromBigEndian<quint32>( payload.constData() );
+				m_playback->mixer().addPacket( id, sequence, payload.mid( 4 ) );
+				Q_EMIT studentPacketReceived( id );
+			}
+			if( client.group != ClassGroup )
+			{
+				forwardStudentAudio( id, payload );
+			}
 		}
 		else if( type == FrameType::Bye )
 		{
@@ -198,10 +310,28 @@ void LabAudioHub::handleHello( int id, const QByteArray& payload )
 		const auto roles = quint8( payload.at( 1 ) );
 		const auto tokenLength = qFromBigEndian<quint16>( payload.constData() + 2 );
 		const auto token = payload.mid( 4, tokenLength );
-		reason = QStringLiteral( "token %1, expected %2" ).arg( tokenFingerprint( token ), tokenFingerprint( m_token ) );
-		if( payload.size() == 4 + tokenLength && constantTimeEquals( token, m_token ) )
+		reason = QStringLiteral( "token %1, expected %2 or one of %3 group tokens" )
+					 .arg( tokenFingerprint( token ), tokenFingerprint( m_token ) ).arg( m_groupTokens.size() );
+		int group = NoGroup;
+		if( payload.size() == 4 + tokenLength )
 		{
-			client.roles = roles & ( ReceiveTeacher | SendMicrophone );
+			if( constantTimeEquals( token, m_token ) )
+			{
+				group = ClassGroup;
+			}
+			for( auto it = m_groupTokens.cbegin(); it != m_groupTokens.cend(); ++it )
+			{
+				if( constantTimeEquals( token, it.key() ) )
+				{
+					group = it.value();
+				}
+			}
+		}
+		if( group != NoGroup )
+		{
+			client.roles = roles & ( ReceiveTeacher | SendMicrophone | ReceivePeers );
+			client.group = group;
+			client.token = token;
 			client.authenticated = true;
 			accepted = true;
 		}
@@ -216,7 +346,9 @@ void LabAudioHub::handleHello( int id, const QByteArray& payload )
 		return;
 	}
 	client.helloTimer->stop();
-	vInfo() << "LabAudio client" << client.socket->peerAddress().toString() << "joined with roles" << client.roles;
+	vInfo() << "LabAudio client" << client.socket->peerAddress().toString() << "joined group" << client.group
+			<< "with roles" << client.roles;
+	sendStatus( id );
 	updateAudio();
 }
 
@@ -256,11 +388,8 @@ void LabAudioHub::updateAudio()
 	bool anySender = false;
 	for( const auto& client : std::as_const( m_clients ) )
 	{
-		if( client.authenticated )
-		{
-			anyReceiver |= ( client.roles & ReceiveTeacher ) != 0;
-			anySender |= ( client.roles & SendMicrophone ) != 0;
-		}
+		anyReceiver |= hearsTeacher( client );
+		anySender |= teacherHears( client );
 	}
 
 	if( anyReceiver && m_capture == nullptr )
@@ -301,12 +430,37 @@ void LabAudioHub::sendTeacherPacket( const QByteArray& packet )
 	int receivers = 0;
 	for( auto& client : m_clients )
 	{
-		if( client.authenticated && ( client.roles & ReceiveTeacher ) && client.socket &&
-			client.socket->bytesToWrite() < MaxQueuedBytes )
+		if( hearsTeacher( client ) && client.socket && client.socket->bytesToWrite() < MaxQueuedBytes )
 		{
 			client.socket->write( data );
 			++receivers;
 		}
 	}
 	Q_EMIT teacherPacketSent( receivers );
+}
+
+
+
+void LabAudioHub::forwardStudentAudio( int sourceId, const QByteArray& audioPayload )
+{
+	const auto group = m_clients.value( sourceId ).group;
+	QByteArray data;
+	int receivers = 0;
+	for( auto it = m_clients.begin(); it != m_clients.end(); ++it )
+	{
+		auto& client = it.value();
+		if( it.key() == sourceId || client.authenticated == false || client.group != group ||
+			( client.roles & ReceivePeers ) == 0 || client.socket.isNull() ||
+			client.socket->bytesToWrite() >= MaxQueuedBytes )
+		{
+			continue;
+		}
+		if( data.isEmpty() )
+		{
+			data = frame( FrameType::PeerAudio, peerAudioPayload( quint32( sourceId ), audioPayload ) );
+		}
+		client.socket->write( data );
+		++receivers;
+	}
+	Q_EMIT peerPacketForwarded( sourceId, receivers );
 }

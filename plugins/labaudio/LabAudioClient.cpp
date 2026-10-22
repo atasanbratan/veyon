@@ -39,7 +39,7 @@ using namespace LabAudioProtocol;
 
 
 
-LabAudioIndicator::LabAudioIndicator( quint8 roles ) :
+LabAudioIndicator::LabAudioIndicator( quint8 roles, const QStringList& groupMembers ) :
 	QWidget( nullptr, Qt::Tool | Qt::WindowStaysOnTopHint | Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus ),
 	m_title( new QLabel( this ) ),
 	m_status( new QLabel( this ) )
@@ -53,7 +53,11 @@ LabAudioIndicator::LabAudioIndicator( quint8 roles ) :
 	layout->setContentsMargins( 14, 10, 14, 10 );
 
 	QString title;
-	if( ( roles & ReceiveTeacher ) && ( roles & SendMicrophone ) )
+	if( roles & ReceivePeers )
+	{
+		title = tr( "Group work" );
+	}
+	else if( ( roles & ReceiveTeacher ) && ( roles & SendMicrophone ) )
 	{
 		title = tr( "Talking with the teacher" );
 	}
@@ -67,6 +71,21 @@ LabAudioIndicator::LabAudioIndicator( quint8 roles ) :
 	}
 	m_title->setText( QStringLiteral( "<b>%1</b>" ).arg( title.toHtmlEscaped() ) );
 	layout->addWidget( m_title );
+	if( roles & ReceivePeers )
+	{
+		auto members = new QLabel( groupMembers.isEmpty()
+									   ? tr( "You are talking with your group." )
+									   : tr( "You are talking with: %1" ).arg( groupMembers.join( QStringLiteral( ", " ) ) ),
+								   this );
+		members->setWordWrap( true );
+		members->setMaximumWidth( 360 );
+		layout->addWidget( members );
+		// Students always see when the teacher is listening to their group.
+		m_teacher = new QLabel( this );
+		m_teacher->setStyleSheet( QStringLiteral( "color: #fbbf24;" ) );
+		m_teacher->hide();
+		layout->addWidget( m_teacher );
+	}
 	layout->addWidget( m_status );
 	m_status->setText( tr( "Connecting…" ) );
 
@@ -109,6 +128,36 @@ void LabAudioIndicator::setLevel( float level )
 
 
 
+void LabAudioIndicator::setTeacherStatus( quint8 statusFlags )
+{
+	if( m_teacher == nullptr )
+	{
+		return;
+	}
+	if( statusFlags & TeacherTalking )
+	{
+		m_teacher->setText( tr( "The teacher has joined your group." ) );
+		m_teacher->show();
+	}
+	else if( statusFlags & TeacherListening )
+	{
+		m_teacher->setText( tr( "The teacher is listening to your group." ) );
+		m_teacher->show();
+	}
+	else
+	{
+		m_teacher->hide();
+	}
+	adjustSize();
+	if( const auto screen = QGuiApplication::primaryScreen() )
+	{
+		const auto area = screen->availableGeometry();
+		move( area.right() - width() - 20, area.bottom() - height() - 20 );
+	}
+}
+
+
+
 void LabAudioIndicator::closeEvent( QCloseEvent* event )
 {
 	// The student cannot dismiss the notice while the teacher keeps the audio mode active;
@@ -125,15 +174,17 @@ void LabAudioIndicator::closeEvent( QCloseEvent* event )
 
 
 
-LabAudioClient::LabAudioClient( const QStringList& hosts, int port, const QByteArray& token, quint8 roles, QObject* parent ) :
+LabAudioClient::LabAudioClient( const QStringList& hosts, int port, const QByteArray& token, quint8 roles,
+								const QStringList& groupMembers, QObject* parent ) :
 	QObject( parent ),
 	m_hosts( hosts ),
 	m_port( port ),
 	m_token( token ),
 	m_roles( roles ),
 	m_socket( new QTcpSocket( this ) ),
-	m_indicator( new LabAudioIndicator( roles ) )
+	m_indicator( new LabAudioIndicator( roles, groupMembers ) )
 {
+	connect( this, &LabAudioClient::teacherStatusChanged, m_indicator, &LabAudioIndicator::setTeacherStatus );
 	connect( m_socket, &QTcpSocket::connected, this, &LabAudioClient::onConnected );
 	connect( m_socket, &QTcpSocket::readyRead, this, &LabAudioClient::onReadyRead );
 	connect( m_socket, &QTcpSocket::disconnected, this, &LabAudioClient::onDisconnected );
@@ -261,8 +312,23 @@ void LabAudioClient::onReadyRead()
 		if( type == FrameType::Audio && ( m_roles & ReceiveTeacher ) && m_playback && payload.size() > 4 &&
 			payload.size() <= 4 + MaxFrameBytes )
 		{
-			m_playback->mixer().addPacket( 0, qFromBigEndian<quint32>( payload.constData() ), payload.mid( 4 ) );
+			m_playback->mixer().addPacket( TeacherStreamId, qFromBigEndian<quint32>( payload.constData() ), payload.mid( 4 ) );
 			Q_EMIT audioReceived( int( payload.size() ) );
+		}
+		else if( type == FrameType::PeerAudio && ( m_roles & ReceivePeers ) && m_playback && payload.size() > 8 &&
+				 payload.size() <= 8 + MaxFrameBytes )
+		{
+			const auto sourceId = int( qFromBigEndian<quint32>( payload.constData() ) );
+			if( sourceId != TeacherStreamId )
+			{
+				m_playback->mixer().addPacket( sourceId, qFromBigEndian<quint32>( payload.constData() + 4 ),
+											   payload.mid( 8 ) );
+				Q_EMIT peerAudioReceived( sourceId );
+			}
+		}
+		else if( type == FrameType::Status && payload.size() == 1 )
+		{
+			Q_EMIT teacherStatusChanged( quint8( payload.at( 0 ) ) );
 		}
 	}
 	if( error )
@@ -309,7 +375,7 @@ void LabAudioClient::onDisconnected()
 void LabAudioClient::startAudio()
 {
 	QStringList problems;
-	if( ( m_roles & ReceiveTeacher ) && m_playback == nullptr )
+	if( ( m_roles & ( ReceiveTeacher | ReceivePeers ) ) && m_playback == nullptr )
 	{
 		m_playback = new LabAudioPlayback( this );
 		if( m_playback->start() == false )

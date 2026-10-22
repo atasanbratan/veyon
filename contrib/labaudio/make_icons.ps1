@@ -55,3 +55,15 @@ $pen = New-Object System.Drawing.Pen $orange, 7
 $g.DrawArc($pen, 44, 54, 40, 40, 200, 140)
 $g.DrawArc($pen, 54, 66, 20, 20, 200, 140)
 $c[0].Save("$OutDir\listen.png"); $g.Dispose(); $c[0].Dispose()
+
+# Group work: three people (heads and shoulders), the middle one in the accent colour.
+$c = New-Canvas; $g = $c[1]
+function Draw-Person($g, $color, $x, $y, $scale) {
+    $brush = New-Object System.Drawing.SolidBrush $color
+    $g.FillEllipse($brush, $x - 14 * $scale, $y, 28 * $scale, 28 * $scale)
+    $g.FillPie($brush, $x - 26 * $scale, $y + 30 * $scale, 52 * $scale, 52 * $scale, 180, 180)
+}
+Draw-Person $g $blue 30 34 0.9
+Draw-Person $g $blue 98 34 0.9
+Draw-Person $g $orange 64 22 1.1
+$c[0].Save("$OutDir\group.png"); $g.Dispose(); $c[0].Dispose()

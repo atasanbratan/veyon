@@ -4,5 +4,6 @@
         <file>broadcast.png</file>
         <file>talk.png</file>
         <file>listen.png</file>
+        <file>group.png</file>
     </qresource>
 </RCC>

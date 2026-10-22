@@ -40,10 +40,11 @@ class LabAudioIndicator : public QWidget
 {
 	Q_OBJECT
 public:
-	explicit LabAudioIndicator( quint8 roles );
+	explicit LabAudioIndicator( quint8 roles, const QStringList& groupMembers = {} );
 
 	void setStatus( const QString& status );
 	void setLevel( float level );
+	void setTeacherStatus( quint8 statusFlags );
 
 protected:
 	void closeEvent( QCloseEvent* event ) override;
@@ -51,6 +52,7 @@ protected:
 private:
 	QLabel* m_title;
 	QLabel* m_status;
+	QLabel* m_teacher{nullptr};
 	QProgressBar* m_level{nullptr};
 };
 
@@ -60,7 +62,9 @@ class LabAudioClient : public QObject
 	Q_OBJECT
 public:
 	// hosts: addresses of the teacher's computer, tried in order (the first one is the preferred route).
-	LabAudioClient( const QStringList& hosts, int port, const QByteArray& token, quint8 roles, QObject* parent = nullptr );
+	// groupMembers: names of the other students in the group (group work only).
+	LabAudioClient( const QStringList& hosts, int port, const QByteArray& token, quint8 roles,
+					const QStringList& groupMembers = {}, QObject* parent = nullptr );
 	~LabAudioClient() override;
 
 	static constexpr int ReconnectIntervalMs = 2000;
@@ -69,6 +73,8 @@ public:
 
 Q_SIGNALS:
 	void audioReceived( int bytes );
+	void peerAudioReceived( int sourceId );
+	void teacherStatusChanged( quint8 statusFlags );
 
 private:
 	void connectToHub();

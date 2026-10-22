@@ -15,6 +15,8 @@ build_veyon_plugin(labaudio
 	LabAudioClient.h
 	LabAudioEngine.cpp
 	LabAudioEngine.h
+	LabAudioGroupWork.cpp
+	LabAudioGroupWork.h
 	LabAudioProtocol.h
 	labaudio.qrc
 	)

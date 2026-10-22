@@ -24,11 +24,14 @@
 
 #pragma once
 
+#include <QPointer>
 #include <QTimer>
 
+#include "ComputerControlInterface.h"
 #include "CryptoCore.h"
 #include "Feature.h"
 #include "FeatureProviderInterface.h"
+#include "LabAudioGroupWork.h"
 
 class LabAudioClient;
 class LabAudioHub;
@@ -46,7 +49,11 @@ public:
 		HubHost,
 		HubPort,
 		Roles,
-		HubAddresses
+		HubAddresses,
+		GroupTokens,	// QVariantMap: hex token -> group id
+		FocusGroup,
+		TeacherTalks,
+		GroupMembers
 	};
 	Q_ENUM(Argument)
 
@@ -60,7 +67,7 @@ public:
 
 	QVersionNumber version() const override
 	{
-		return QVersionNumber( 0, 1 );
+		return QVersionNumber( 0, 2 );
 	}
 
 	QString name() const override
@@ -70,7 +77,7 @@ public:
 
 	QString description() const override
 	{
-		return tr( "Live classroom audio: speak to students, talk with a student, listen to a student" );
+		return tr( "Live classroom audio: speak to students, talk with or listen to a student, pair and group work" );
 	}
 
 	QString vendor() const override
@@ -119,16 +126,31 @@ private:
 		StopClient
 	};
 
+	struct Group
+	{
+		QByteArray token;
+		ComputerControlInterfaceList members;
+		QStringList names;
+	};
+
 	bool startMode( VeyonMasterInterface& master, const Feature& feature,
 					const ComputerControlInterfaceList& computerControlInterfaces );
+	bool startGroupWork( VeyonMasterInterface& master, const ComputerControlInterfaceList& computerControlInterfaces );
+	void assignGroups( const QList<QList<int>>& groups );
+	void startGroupClients();
+	void regroup();
+	void setGroupFocus( int groupId, bool teacherTalks );
+	void endGroupWork();
 	void sendHubCommand();
 	int hubPort() const;
 	static QStringList localAddresses();
+	static QString studentName( const ComputerControlInterface::Pointer& computerControlInterface );
 
 	const Feature m_labAudioFeature;
 	const Feature m_broadcastFeature;
 	const Feature m_talkFeature;
 	const Feature m_listenFeature;
+	const Feature m_groupWorkFeature;
 	const Feature m_hubFeature;
 	const Feature m_clientFeature;
 	const FeatureList m_features;
@@ -137,6 +159,15 @@ private:
 	QTimer m_hubKeepAliveTimer;
 	ComputerControlInterfaceList m_hubInterfaces;
 	int m_activeModes{0};
+
+	// group work (Veyon Master)
+	ComputerControlInterfaceList m_groupStudents;
+	int m_groupSize{2};
+	bool m_randomGroups{true};
+	QList<Group> m_groups;
+	int m_focusGroup{-1};
+	bool m_teacherTalks{false};
+	QPointer<LabAudioGroupPanel> m_groupPanel;
 
 	LabAudioHub* m_hub{nullptr};
 	LabAudioClient* m_client{nullptr};

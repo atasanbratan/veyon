@@ -11,8 +11,24 @@ student, or listens to a student's microphone. Built as a Veyon feature plugin (
 | Speak to students | Teacher → selected (or all) students | any |
 | Talk with student | Teacher ↔ one student | exactly one |
 | Listen to student | Student → teacher | exactly one |
+| Group work | Students ↔ their group (pairs or 2–6); teacher listens to or joins one group | any (≥ 2) |
 
 Starting another mode on a computer replaces its previous mode. "Stop" on the group stops everything.
+
+### Group work
+
+A dialog asks for the group size (2–6, default pairs) and whether to mix students randomly; a single student left over
+joins the last group. A teacher panel next to Veyon Master lists the groups with **Listen** and **Talk** buttons and a
+**New groups** button (same size, new mix). Group work ends with the toolbar button (Veyon stops every mode before it
+starts another, so joining a group cannot be a separate toolbar mode).
+
+- Each group gets its own random token; the hub maps token → group, so a student can only join their own group.
+- Student audio travels through the hub, which forwards the Opus packets unchanged (`PeerAudio`, with the source id) to
+  the other members; each student mixes the streams. No transcoding on the teacher PC; a group of n uses
+  n·(n−1) × 4 kB/s.
+- The teacher hears the focus group and, with **Talk**, the group hears the teacher. Students always see
+  "The teacher is listening to your group" / "The teacher has joined your group" (`Status` frame).
+- Regrouping sends new tokens: the hub disconnects old group members, who reconnect with their new token.
 
 ## Components
 
@@ -37,14 +53,15 @@ Veyon Master (teacher)                    Veyon Server (each PC)            Work
 - Opus, 48 kHz mono, 20 ms frames, 32 kbit/s VOIP mode, in-band FEC. ≈ 4 kB/s per stream; 30 students listening to a
   broadcast ≈ 1 Mbit/s from the teacher PC.
 - Capture/playback via Qt Multimedia (WASAPI). Any device format is converted (downmix + linear resampling).
-- Receive side: per-stream jitter buffer, starts at 60 ms, drops backlog above 240 ms, Opus packet-loss concealment
+- Receive side: per-stream jitter buffer, starts at 60 ms, adapts between 60 and 300 ms (grows after each underflow, shrinks after 15 s without one,
+  excess latency is drained by skipping 1 sample in 200), Opus packet-loss concealment
   for up to two missing frames, underflow → rebuffer.
 - Target end-to-end latency on a wired LAN: < 150 ms (to be measured).
 
 ## Wire protocol (`LabAudioProtocol.h`)
 
 `[u32 length][u8 type][payload]` over TCP (Nagle disabled). Types: Hello (version, role flags, token), HelloAck,
-Audio (u32 sequence + Opus packet), Bye. Max payload 8 KiB; the first frame must be Hello within 5 s.
+Audio (u32 sequence + Opus packet), Bye, Status (u8 teacher flags), PeerAudio (u32 source id + Audio payload). Max payload 8 KiB; the first frame must be Hello within 5 s.
 
 ## Security
 
@@ -59,5 +76,5 @@ Audio (u32 sequence + Opus packet), Bye. Max payload 8 KiB; the first frame must
 
 ## Not in this first version
 
-Pair/group student conversations, per-student volume, push-to-talk, recording, audio encryption, configuration page
+per-student volume, push-to-talk, recording, audio encryption, configuration page
 (port is fixed at 11500 + session id), translations.

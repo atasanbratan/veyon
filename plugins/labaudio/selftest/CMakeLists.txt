@@ -16,3 +16,9 @@ add_executable(labaudio_loopback labaudio_loopback.cpp
 	../LabAudioHub.cpp ../LabAudioHub.h ../LabAudioClient.cpp ../LabAudioClient.h ../LabAudioEngine.cpp ../LabAudioEngine.h)
 target_include_directories(labaudio_loopback BEFORE PRIVATE shim)
 target_link_libraries(labaudio_loopback PRIVATE Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::OPUS)
+
+# Group work routing with simulated students (no audio devices needed while no group is in focus).
+add_executable(labaudio_grouptest labaudio_grouptest.cpp
+	../LabAudioHub.cpp ../LabAudioHub.h ../LabAudioGroupWork.cpp ../LabAudioGroupWork.h ../LabAudioEngine.cpp ../LabAudioEngine.h)
+target_include_directories(labaudio_grouptest BEFORE PRIVATE shim)
+target_link_libraries(labaudio_grouptest PRIVATE Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::OPUS)

@@ -26,6 +26,7 @@
 
 #include <QByteArray>
 #include <QCryptographicHash>
+#include <QList>
 #include <QString>
 #include <QtEndian>
 
@@ -48,15 +49,27 @@ enum class FrameType : quint8
 	Hello = 1,		// client -> hub: u8 version, u8 role flags, u16 token length, token bytes
 	HelloAck = 2,	// hub -> client: u8 accepted (1/0)
 	Audio = 3,		// both directions: u32 sequence, Opus packet
-	Bye = 4
+	Bye = 4,
+	Status = 5,		// hub -> client: u8 StatusFlag bits (what the teacher does with the client's group)
+	PeerAudio = 6	// hub -> client: u32 source id, u32 sequence, Opus packet of a group member
 };
 
 // What a client does in the current lab mode (bit flags).
 enum RoleFlag : quint8
 {
 	ReceiveTeacher = 0x01,	// play the teacher's voice
-	SendMicrophone = 0x02	// send the student's microphone to the teacher
+	SendMicrophone = 0x02,	// send the student's microphone to the teacher (or group)
+	ReceivePeers = 0x04		// play the other members of the student's group
 };
+
+enum StatusFlag : quint8
+{
+	TeacherListening = 0x01,
+	TeacherTalking = 0x02
+};
+
+// Source id 0 is the teacher; group members use their hub client id.
+static constexpr int TeacherStreamId = 0;
 
 inline QByteArray frame( FrameType type, const QByteArray& payload )
 {
@@ -84,6 +97,35 @@ inline QByteArray audioPayload( quint32 sequence, const QByteArray& opusPacket )
 	qToBigEndian( sequence, payload.data() );
 	payload.append( opusPacket );
 	return payload;
+}
+
+// Forwards a student's Audio payload (u32 sequence + Opus) to the other group members.
+inline QByteArray peerAudioPayload( quint32 sourceId, const QByteArray& audioFramePayload )
+{
+	QByteArray payload( 4, Qt::Uninitialized );
+	qToBigEndian( sourceId, payload.data() );
+	payload.append( audioFramePayload );
+	return payload;
+}
+
+// Splits count members into groups of the given size (indices into the member list). A single
+// member left over joins the last group instead of staying alone.
+inline QList<QList<int>> makeGroups( const QList<int>& order, int size )
+{
+	QList<QList<int>> groups;
+	if( size < 2 || order.size() < 2 )
+	{
+		return groups;
+	}
+	for( int i = 0; i < order.size(); i += size )
+	{
+		groups.append( order.mid( i, size ) );
+	}
+	if( groups.size() > 1 && groups.last().size() == 1 )
+	{
+		groups[groups.size() - 2].append( groups.takeLast() );
+	}
+	return groups;
 }
 
 // Incremental parser: append received bytes, then take complete frames.
