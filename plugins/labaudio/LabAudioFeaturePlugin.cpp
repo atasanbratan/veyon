@@ -184,12 +184,14 @@ bool LabAudioFeaturePlugin::controlFeature( Feature::Uid featureUid, Operation o
 			vWarning() << "LabAudio: starting clients on" << computerControlInterfaces.size() << "computers, hub port"
 					   << hubPort() << "addresses" << localAddresses() << "token" << tokenFingerprint( m_token );
 			sendFeatureMessage( FeatureMessage{ m_clientFeature.uid(), FeatureCommand::StartClient }
-									.addArgument( Argument::Token, arguments.value( argToString(Argument::Token), m_token ) )
-									.addArgument( Argument::HubHost, arguments.value( argToString(Argument::HubHost) ) )
+									// Every value needs a concrete type: the receiving Veyon Server
+									// drops all arguments of a message containing an invalid QVariant.
+									.addArgument( Argument::Token, arguments.value( argToString(Argument::Token), m_token ).toByteArray() )
+									.addArgument( Argument::HubHost, arguments.value( argToString(Argument::HubHost), QString() ).toString() )
 									.addArgument( Argument::HubAddresses, localAddresses() )
-									.addArgument( Argument::HubPort, arguments.value( argToString(Argument::HubPort), hubPort() ) )
+									.addArgument( Argument::HubPort, arguments.value( argToString(Argument::HubPort), hubPort() ).toInt() )
 									.addArgument( Argument::Roles, arguments.value( argToString(Argument::Roles),
-																					int( ReceiveTeacher ) ) ),
+																					int( ReceiveTeacher ) ).toInt() ),
 								computerControlInterfaces );
 			return true;
 		}
