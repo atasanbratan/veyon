@@ -501,6 +501,7 @@ void LabAudioClient::startAudio()
 	if( ( m_roles & SendMicrophone ) && m_capture == nullptr )
 	{
 		m_capture = new LabAudioCapture( this );
+		m_capture->setBitRate( m_bitRate );
 		connect( m_capture, &LabAudioCapture::packetReady, this, &LabAudioClient::sendPacket );
 		connect( m_capture, &LabAudioCapture::levelChanged, m_indicator, &LabAudioIndicator::setLevel );
 		connect( m_capture, &LabAudioCapture::failed, m_indicator, &LabAudioIndicator::setStatus );

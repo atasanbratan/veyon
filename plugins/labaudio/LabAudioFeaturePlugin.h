@@ -28,9 +28,11 @@
 #include <QTimer>
 
 #include "ComputerControlInterface.h"
+#include "ConfigurationPagePluginInterface.h"
 #include "CryptoCore.h"
 #include "Feature.h"
 #include "FeatureProviderInterface.h"
+#include "LabAudioConfiguration.h"
 #include "LabAudioGroupWork.h"
 #include "../labaudiocalls/LabAudioCallProtocol.h"
 
@@ -38,11 +40,11 @@ class LabAudioClient;
 class LabAudioHub;
 class VeyonWorkerInterface;
 
-class LabAudioFeaturePlugin : public QObject, FeatureProviderInterface, PluginInterface
+class LabAudioFeaturePlugin : public QObject, FeatureProviderInterface, PluginInterface, ConfigurationPagePluginInterface
 {
 	Q_OBJECT
 	Q_PLUGIN_METADATA(IID "io.veyon.Veyon.Plugins.LabAudio")
-	Q_INTERFACES(PluginInterface FeatureProviderInterface)
+	Q_INTERFACES(PluginInterface FeatureProviderInterface ConfigurationPagePluginInterface)
 public:
 	// Arguments travel keyed by their numeric value: only append, never reorder,
 	// so teacher and student computers with different plugin builds stay compatible.
@@ -63,7 +65,9 @@ public:
 		CallTime,	// LongLong: milliseconds since epoch (UTC)
 		RecordConversation,
 		RecordGroups,
-		RecordingLabels	// QVariantMap: "0" = conversation, group id = group -> file label
+		RecordingLabels,	// QVariantMap: "0" = conversation, group id = group -> file label
+		BitRate,
+		RecordingsFolder
 	};
 	Q_ENUM(Argument)
 
@@ -123,6 +127,8 @@ public:
 	bool handleFeatureMessage( VeyonWorkerInterface& worker, const FeatureMessage& message ) override;
 
 	bool isFeatureActive( VeyonServerInterface& server, Feature::Uid featureUid ) const override;
+
+	ConfigurationPage* createConfigurationPage() override;
 
 	// Default TCP port of the teacher's audio hub (plus the Veyon session id on multi-session hosts).
 	static constexpr int DefaultHubPort = 11500;
@@ -210,6 +216,8 @@ private:
 
 	// worker processes
 	VeyonWorkerInterface* m_worker{nullptr};
+	LabAudioConfiguration m_configuration;
+
 	LabAudioHub* m_hub{nullptr};
 	LabAudioClient* m_client{nullptr};
 };

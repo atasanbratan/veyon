@@ -59,6 +59,8 @@ public:
 	{
 		m_muted = muted;
 	}
+	// Opus bit rate in bit/s (default 32000), also while running.
+	void setBitRate( int bitRate );
 	bool isMuted() const
 	{
 		return m_muted;
@@ -81,6 +83,7 @@ private:
 	double m_resamplePosition{0};
 	qint16 m_lastSample{0};
 	bool m_muted{false};
+	int m_bitRate{32000};
 	QString m_error;
 };
 

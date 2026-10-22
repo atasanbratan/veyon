@@ -84,6 +84,17 @@ LabAudioHub::~LabAudioHub()
 
 
 
+void LabAudioHub::setBitRate( int bitRate )
+{
+	m_bitRate = bitRate;
+	if( m_capture )
+	{
+		m_capture->setBitRate( bitRate );
+	}
+}
+
+
+
 void LabAudioHub::setTeacherMuted( bool muted )
 {
 	m_teacherMuted = muted;
@@ -130,7 +141,7 @@ void LabAudioHub::updateRecorders()
 	bool changed = false;
 	const auto startRecorder = [this]( int key ) {
 		const auto label = m_recordingLabels.value( key );
-		auto recorder = new LabAudioRecorder( LabAudioRecorder::newRecordingPath( label ), label, this );
+		auto recorder = new LabAudioRecorder( LabAudioRecorder::newRecordingPath( label ), label, m_bitRate, this );
 		if( recorder->isRecording() )
 		{
 			vWarning() << "LabAudio: recording to" << recorder->path();
@@ -597,6 +608,7 @@ void LabAudioHub::updateAudio()
 	if( anyReceiver && m_capture == nullptr )
 	{
 		m_capture = new LabAudioCapture( this );
+		m_capture->setBitRate( m_bitRate );
 		m_capture->setMuted( m_teacherMuted );
 		connect( m_capture, &LabAudioCapture::packetReady, this, &LabAudioHub::sendTeacherPacket );
 		if( m_capture->start() == false )

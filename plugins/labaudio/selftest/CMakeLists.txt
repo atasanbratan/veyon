@@ -4,6 +4,8 @@ cmake_minimum_required(VERSION 3.18)
 project(labaudio_selftest CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
 find_package(Qt6 REQUIRED COMPONENTS Core Multimedia)
 find_package(PkgConfig REQUIRED)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
@@ -20,6 +22,8 @@ target_link_libraries(labaudio_loopback PRIVATE Qt6::Widgets Qt6::Network Qt6::M
 
 # Group work routing with simulated students (no audio devices needed while no group is in focus).
 add_executable(labaudio_grouptest labaudio_grouptest.cpp
-	../LabAudioHub.cpp ../LabAudioHub.h ../LabAudioRecorder.cpp ../LabAudioRecorder.h ../LabAudioClient.cpp ../LabAudioClient.h ../../labaudiocalls/LabAudioCalls.cpp ../../labaudiocalls/LabAudioCalls.h ../LabAudioCrypto.cpp ../LabAudioCrypto.h ../LabAudioGroupWork.cpp ../LabAudioGroupWork.h ../LabAudioEngine.cpp ../LabAudioEngine.h)
+	../LabAudioHub.cpp ../LabAudioHub.h ../LabAudioRecorder.cpp ../LabAudioRecorder.h ../LabAudioClient.cpp ../LabAudioClient.h ../../labaudiocalls/LabAudioCalls.cpp ../../labaudiocalls/LabAudioCalls.h ../LabAudioCrypto.cpp ../LabAudioCrypto.h ../LabAudioGroupWork.cpp ../LabAudioGroupWork.h ../LabAudioEngine.cpp ../LabAudioEngine.h
+	../LabAudioConfigurationPage.ui ../labaudio.qrc)
 target_include_directories(labaudio_grouptest BEFORE PRIVATE shim)
+set_target_properties(labaudio_grouptest PROPERTIES AUTOUIC_SEARCH_PATHS ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(labaudio_grouptest PRIVATE Qt6::Widgets Qt6::Network Qt6::Multimedia PkgConfig::OPUS OpenSSL::Crypto)

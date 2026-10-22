@@ -33,6 +33,7 @@
 #include "FeatureProviderInterface.h"
 #include "LabAudioCallBoard.h"
 #include "LabAudioCalls.h"
+#include "../labaudio/LabAudioConfiguration.h"
 
 class VeyonWorkerInterface;
 
@@ -117,6 +118,7 @@ private:
 	const Feature m_callsFeature;
 	const Feature m_callTrayFeature;
 	const FeatureList m_features;
+	LabAudioConfiguration m_configuration;
 
 	// Veyon Server
 	LabAudioCallBoard m_callBoard;

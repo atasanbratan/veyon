@@ -23,6 +23,7 @@
 #include "../../labaudiocalls/LabAudioCalls.h"
 #include "../LabAudioClient.h"
 #include "../LabAudioGroupWork.h"
+#include "ui_LabAudioConfigurationPage.h"
 #include "../LabAudioHub.h"
 
 using namespace LabAudioProtocol;
@@ -177,6 +178,18 @@ int main( int argc, char** argv )
 						  { 2, QStringLiteral( "Carla Diaz (PC-03)" ), 2, QDateTime::currentDateTime() } } );
 		wait( 200 );
 		calls.grab().save( dir + QStringLiteral( "/teacher-calls.png" ) );
+
+		// Layout of the Veyon Configurator page (without the Veyon configuration behind it).
+		QWidget settings;
+		Ui::LabAudioConfigurationPage settingsUi;
+		settingsUi.setupUi( &settings );
+		settingsUi.hubPort->setValue( 11500 );
+		settingsUi.audioQuality->setCurrentIndex( 1 );
+		settingsUi.callTrayEnabled->setChecked( true );
+		settings.resize( 640, 460 );
+		settings.show();
+		wait( 200 );
+		settings.grab().save( dir + QStringLiteral( "/settings-page.png" ) );
 		return 0;
 	}
 

@@ -56,7 +56,8 @@ LabAudioCallsPlugin::LabAudioCallsPlugin( QObject* parent ) :
 					   Feature::Uid( "a8d3c6e2-1f47-4c9b-b2e5-6d0f9a3e7c41" ),
 					   Feature::Uid(),
 					   {}, {}, {} ),
-	m_features( { m_callsFeature, m_callTrayFeature } )
+	m_features( { m_callsFeature, m_callTrayFeature } ),
+	m_configuration( &VeyonCore::config() )
 {
 }
 
@@ -151,6 +152,15 @@ void LabAudioCallsPlugin::pushCallState( VeyonServerInterface& server )
 void LabAudioCallsPlugin::ensureCallTray( VeyonServerInterface& server )
 {
 	auto& workers = server.featureWorkerManager();
+	if( m_configuration.callTrayEnabled() == false )
+	{
+		// Turned off in the Veyon Configurator ("Lab audio" page); the notice button still works.
+		if( workers.isWorkerRunning( m_callTrayFeature.uid() ) )
+		{
+			workers.stopWorker( m_callTrayFeature.uid() );
+		}
+		return;
+	}
 	if( workers.isWorkerRunning( m_callTrayFeature.uid() ) ||
 		VeyonCore::platform().sessionFunctions().currentSessionHasUser() == false )
 	{
@@ -382,3 +392,8 @@ bool LabAudioCallsPlugin::handleFeatureMessage( VeyonWorkerInterface& worker, co
 	m_callTray->setState( message.argument( Calling ).toBool(), message.argument( CallsAllowed ).toBool() );
 	return true;
 }
+
+
+
+// The same settings as the LabAudio plugin (section "LabAudio"); each plugin library has its own proxy.
+IMPLEMENT_CONFIG_PROXY(LabAudioConfiguration)

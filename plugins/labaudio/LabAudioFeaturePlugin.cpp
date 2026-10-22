@@ -34,6 +34,7 @@
 #include "ComputerControlInterface.h"
 #include "FeatureWorkerManager.h"
 #include "LabAudioClient.h"
+#include "LabAudioConfigurationPage.h"
 #include "LabAudioFeaturePlugin.h"
 #include "LabAudioHub.h"
 #include "LabAudioProtocol.h"
@@ -100,7 +101,8 @@ LabAudioFeaturePlugin::LabAudioFeaturePlugin( QObject* parent ) :
 					 tr( "Lab audio client" ), {}, {} ),
 	m_features( { m_labAudioFeature, m_broadcastFeature, m_talkFeature, m_listenFeature, m_groupWorkFeature,
 				  m_hubFeature, m_clientFeature } ),
-	m_token( CryptoCore::generateChallenge() )
+	m_token( CryptoCore::generateChallenge() ),
+	m_configuration( &VeyonCore::config() )
 {
 	Q_ASSERT( m_clientFeature.uid() == LabAudioCallProtocol::LabAudioClientFeatureUid );
 	m_hubKeepAliveTimer.setInterval( HubKeepAliveIntervalMs );
@@ -252,6 +254,7 @@ void LabAudioFeaturePlugin::setRecordGroups( bool record )
 
 void LabAudioFeaturePlugin::openRecordings()
 {
+	LabAudioRecorder::setConfiguredFolder( m_configuration.recordingsFolder() );
 	// Veyon Master runs as the same user as the teacher's hub, so this is the folder it records to.
 	QDesktopServices::openUrl( QUrl::fromLocalFile( LabAudioRecorder::recordingsFolder() ) );
 }
@@ -288,7 +291,7 @@ QStringList LabAudioFeaturePlugin::localAddresses()
 
 int LabAudioFeaturePlugin::hubPort() const
 {
-	return DefaultHubPort + VeyonCore::sessionId();
+	return qBound( 1024, m_configuration.hubPort(), 65000 ) + VeyonCore::sessionId();
 }
 
 
@@ -340,7 +343,8 @@ bool LabAudioFeaturePlugin::controlFeature( Feature::Uid featureUid, Operation o
 												  arguments.value( argToString(Argument::GroupMembers), QStringList() )
 													  .toStringList() )
 									.addArgument( Argument::StudentName,
-												  arguments.value( argToString(Argument::StudentName), QString() ).toString() ),
+												  arguments.value( argToString(Argument::StudentName), QString() ).toString() )
+									.addArgument( Argument::BitRate, LabAudioQuality::bitRate( m_configuration.audioQuality() ) ),
 								computerControlInterfaces );
 			return true;
 		}
@@ -380,7 +384,9 @@ void LabAudioFeaturePlugin::sendHubCommand()
 								.addArgument( Argument::TeacherMuted, m_teacherMuted )
 								.addArgument( Argument::RecordConversation, m_recordConversation )
 								.addArgument( Argument::RecordGroups, m_recordGroups )
-								.addArgument( Argument::RecordingLabels, recordingLabels ),
+								.addArgument( Argument::RecordingLabels, recordingLabels )
+								.addArgument( Argument::BitRate, LabAudioQuality::bitRate( m_configuration.audioQuality() ) )
+								.addArgument( Argument::RecordingsFolder, m_configuration.recordingsFolder() ),
 							m_hubInterfaces );
 	}
 	else
@@ -752,6 +758,11 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonWorkerInterface& worker, 
 			{
 				m_hub->setToken( message.argument( Argument::Token ).toByteArray() );
 			}
+			if( message.hasArgument( Argument::BitRate ) )
+			{
+				m_hub->setBitRate( message.argument( Argument::BitRate ).toInt() );
+			}
+			LabAudioRecorder::setConfiguredFolder( message.argument( Argument::RecordingsFolder ).toString() );
 			QHash<QByteArray, int> groupTokens;
 			const auto groups = message.argument( Argument::GroupTokens ).toMap();
 			for( auto it = groups.cbegin(); it != groups.cend(); ++it )
@@ -813,6 +824,10 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonWorkerInterface& worker, 
 										   message.argument( Argument::Token ).toByteArray(),
 										   roles,
 										   message.argument( Argument::GroupMembers ).toStringList() );
+			if( message.argument( Argument::BitRate ).toInt() > 0 )
+			{
+				m_client->setBitRate( message.argument( Argument::BitRate ).toInt() );
+			}
 			connect( m_client->indicator(), &LabAudioIndicator::callToggled, this, [this]( bool calling ) {
 				sendCalling( calling );
 			} );
@@ -848,3 +863,14 @@ bool LabAudioFeaturePlugin::isFeatureActive( VeyonServerInterface& server, Featu
 	}
 	return false;
 }
+
+
+
+ConfigurationPage* LabAudioFeaturePlugin::createConfigurationPage()
+{
+	return new LabAudioConfigurationPage( m_configuration );
+}
+
+
+
+IMPLEMENT_CONFIG_PROXY(LabAudioConfiguration)

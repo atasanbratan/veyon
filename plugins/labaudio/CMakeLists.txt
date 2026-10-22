@@ -14,6 +14,10 @@ build_veyon_plugin(labaudio
 	LabAudioHub.h
 	LabAudioClient.cpp
 	LabAudioClient.h
+	LabAudioConfiguration.h
+	LabAudioConfigurationPage.cpp
+	LabAudioConfigurationPage.h
+	LabAudioConfigurationPage.ui
 	LabAudioCrypto.cpp
 	LabAudioCrypto.h
 	LabAudioEngine.cpp

@@ -24,7 +24,9 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QProcessEnvironment>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QtEndian>
 
@@ -231,7 +233,7 @@ void LabAudioOggOpusWriter::writePage( const QList<QByteArray>& packets, quint8 
 
 
 
-LabAudioRecorder::LabAudioRecorder( const QString& path, const QString& title, QObject* parent ) :
+LabAudioRecorder::LabAudioRecorder( const QString& path, const QString& title, int bitRate, QObject* parent ) :
 	QObject( parent ),
 	m_path( path ),
 	m_title( title ),
@@ -251,7 +253,7 @@ LabAudioRecorder::LabAudioRecorder( const QString& path, const QString& title, Q
 		m_encoder = nullptr;
 		return;
 	}
-	opus_encoder_ctl( m_encoder, OPUS_SET_BITRATE( BitRate ) );
+	opus_encoder_ctl( m_encoder, OPUS_SET_BITRATE( bitRate ) );
 	opus_int32 lookahead = 0;
 	opus_encoder_ctl( m_encoder, OPUS_GET_LOOKAHEAD( &lookahead ) );
 
@@ -330,13 +332,50 @@ void LabAudioRecorder::tick()
 
 
 
+namespace
+{
+QString configuredFolder;
+}
+
+
+
+void LabAudioRecorder::setConfiguredFolder( const QString& folder )
+{
+	// Expand Windows-style %VARIABLE% references, e.g. D:\Recordings\%USERNAME%.
+	QString expanded = folder.trimmed();
+	const auto environment = QProcessEnvironment::systemEnvironment();
+	static const QRegularExpression variable( QStringLiteral( "%([^%]+)%" ) );
+	auto match = variable.match( expanded );
+	while( match.hasMatch() )
+	{
+		// Unknown variables stay as they are; replaced text is not expanded again.
+		auto next = match.capturedEnd();
+		if( environment.contains( match.captured( 1 ) ) )
+		{
+			const auto value = environment.value( match.captured( 1 ) );
+			expanded.replace( match.capturedStart(), match.capturedLength(), value );
+			next = match.capturedStart() + value.size();
+		}
+		match = variable.match( expanded, next );
+	}
+	configuredFolder = QDir::fromNativeSeparators( expanded );
+}
+
+
+
 QString LabAudioRecorder::recordingsFolder()
 {
 	// LABAUDIO_RECORDINGS_DIR: used by the self-tests so they do not write into Documents.
-	const auto folder = qEnvironmentVariableIsSet( "LABAUDIO_RECORDINGS_DIR" )
-							? qEnvironmentVariable( "LABAUDIO_RECORDINGS_DIR" )
-							: QStandardPaths::writableLocation( QStandardPaths::DocumentsLocation ) +
-								  QStringLiteral( "/Lab audio recordings" );
+	QString folder = configuredFolder;
+	if( qEnvironmentVariableIsSet( "LABAUDIO_RECORDINGS_DIR" ) )
+	{
+		folder = qEnvironmentVariable( "LABAUDIO_RECORDINGS_DIR" );
+	}
+	else if( folder.isEmpty() )
+	{
+		folder = QStandardPaths::writableLocation( QStandardPaths::DocumentsLocation ) +
+				 QStringLiteral( "/Lab audio recordings" );
+	}
 	QDir().mkpath( folder );
 	return folder;
 }

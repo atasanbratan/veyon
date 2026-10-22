@@ -58,6 +58,8 @@ public:
 	void setFocus( int focusGroup, bool teacherTalks );
 	// Mutes the teacher's microphone (silence keeps flowing so students' buffers stay steady).
 	void setTeacherMuted( bool muted );
+	// Opus bit rate (bit/s) of the teacher microphone and of recordings.
+	void setBitRate( int bitRate );
 	// conversation: what the teacher hears and says; groups: one file per group. labels: 0 = conversation,
 	// group id = that group (a changed label starts a new file).
 	void setRecording( bool conversation, bool groups, const QHash<int, QString>& labels );
@@ -109,6 +111,7 @@ private:
 	int m_focusGroup{NoGroup};
 	bool m_teacherTalks{false};
 	bool m_teacherMuted{false};
+	int m_bitRate{LabAudioRecorder::DefaultBitRate};
 	bool m_recordConversation{false};
 	bool m_recordGroups{false};
 	QHash<int, QString> m_recordingLabels;

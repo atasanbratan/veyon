@@ -437,6 +437,22 @@ static void testRecording()
 
 
 
+static void testRecordingsFolder()
+{
+	const auto temp = QDir::fromNativeSeparators( qEnvironmentVariable( "TEMP" ) );
+	LabAudioRecorder::setConfiguredFolder( QStringLiteral( "%TEMP%\\labaudio-folder-test\\%NO_SUCH_VARIABLE_42%" ) );
+	const auto folder = LabAudioRecorder::recordingsFolder();
+	CHECK( folder == temp + QStringLiteral( "/labaudio-folder-test/%NO_SUCH_VARIABLE_42%" ) && QDir( folder ).exists(),
+		   "recordings folder: %TEMP% expanded, unknown variable kept, folder created" );
+	QDir( temp + QStringLiteral( "/labaudio-folder-test" ) ).removeRecursively();
+
+	LabAudioRecorder::setConfiguredFolder( {} );
+	CHECK( LabAudioRecorder::recordingsFolder().endsWith( QStringLiteral( "/Lab audio recordings" ) ),
+		   "no folder configured: Documents\\Lab audio recordings" );
+}
+
+
+
 static void testCallBoard()
 {
 	LabAudioCallBoard board;
@@ -495,6 +511,7 @@ int main( int argc, char** argv )
 	testCrypto();
 	testCallBoard();
 	testRecording();
+	testRecordingsFolder();
 	std::printf( failures ? "\n%d FAILED\n" : "\nALL PASSED\n", failures );
 	return failures ? 1 : 0;
 }

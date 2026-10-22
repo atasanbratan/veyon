@@ -88,6 +88,11 @@ public:
 	{
 		return m_indicator;
 	}
+	// Opus bit rate of this student's microphone (bit/s), set by the teacher.
+	void setBitRate( int bitRate )
+	{
+		m_bitRate = bitRate;
+	}
 	~LabAudioClient() override;
 
 	static constexpr int ReconnectIntervalMs = 2000;
@@ -126,6 +131,7 @@ private:
 	QTimer m_reconnectTimer;
 	bool m_accepted{false};
 	quint32 m_sequence{0};
+	int m_bitRate{32000};
 	LabAudioCapture* m_capture{nullptr};
 	LabAudioPlayback* m_playback{nullptr};
 	LabAudioIndicator* m_indicator;

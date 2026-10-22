@@ -61,6 +61,19 @@ starts another, so joining a group cannot be a separate toolbar mode).
   n·(n−1) × 4 kB/s.
 - The teacher hears the focus group and, with **Talk**, the group hears the teacher. Students always see
   "The teacher is listening to your group" / "The teacher has joined your group" (`Status` frame).
+
+### Settings (Veyon Configurator → "Lab audio")
+
+Stored in the Veyon configuration, section `LabAudio` (`LabAudioConfiguration.h`), so they travel with Veyon's
+configuration export/import. Only the teacher computer's values matter for the first three; the quality is sent to
+the students with every mode.
+
+| Setting | Key | Default |
+|---|---|---|
+| Audio port (students connect to it, + session id) | `HubPort` | 11500 (installer firewall rule: 11500–11599) |
+| Audio quality: Speech 24 / Standard 32 / High 48 / Music 64 kbit/s | `AudioQuality` | Standard |
+| Recordings folder (`%VARIABLE%`s expanded; empty = Documents\Lab audio recordings) | `RecordingsFolder` | empty |
+| "Call the teacher" tray icon on student computers | `CallTrayEnabled` | on |
 - Regrouping sends new tokens: the hub disconnects old group members, who reconnect with their new token.
 
 ## Components
@@ -119,5 +132,4 @@ payload); calls travel through Veyon, not this connection. Max payload 8 KiB; He
 
 ## Wait list
 
-- Configuration page (port is fixed at 11500 + session id, audio quality).
 - Translations.

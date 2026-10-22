@@ -69,7 +69,7 @@ class LabAudioRecorder : public QObject
 {
 	Q_OBJECT
 public:
-	LabAudioRecorder( const QString& path, const QString& title, QObject* parent = nullptr );
+	LabAudioRecorder( const QString& path, const QString& title, int bitRate = DefaultBitRate, QObject* parent = nullptr );
 	~LabAudioRecorder() override;
 
 	bool isRecording() const
@@ -92,12 +92,14 @@ public:
 	void addPacket( int streamId, quint32 sequence, const QByteArray& opusPacket );
 	void removeStream( int streamId );
 
-	// Documents\Lab audio recordings of the logged-in user (created if needed).
+	// The configured folder (environment variables like %USERNAME% expanded) or, if none is configured,
+	// Documents\Lab audio recordings of the logged-in user; created if needed.
 	static QString recordingsFolder();
+	static void setConfiguredFolder( const QString& folder );
 	// "<folder>/2026-10-22 13-40-05 Group 2 - Anna, Ben.opus"; characters not allowed in file names are replaced.
 	static QString newRecordingPath( const QString& label );
 
-	static constexpr int BitRate = 32000;
+	static constexpr int DefaultBitRate = 32000;
 
 private:
 	void tick();

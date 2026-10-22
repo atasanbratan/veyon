@@ -122,7 +122,7 @@ bool LabAudioCapture::start()
 		m_error = tr( "The audio encoder could not be initialised." );
 		return false;
 	}
-	opus_encoder_ctl( m_encoder, OPUS_SET_BITRATE( 32000 ) );
+	opus_encoder_ctl( m_encoder, OPUS_SET_BITRATE( m_bitRate ) );
 	opus_encoder_ctl( m_encoder, OPUS_SET_INBAND_FEC( 1 ) );
 	opus_encoder_ctl( m_encoder, OPUS_SET_PACKET_LOSS_PERC( 5 ) );
 
@@ -145,6 +145,17 @@ bool LabAudioCapture::start()
 		}
 	} );
 	return true;
+}
+
+
+
+void LabAudioCapture::setBitRate( int bitRate )
+{
+	m_bitRate = qBound( 6000, bitRate, 128000 );
+	if( m_encoder )
+	{
+		opus_encoder_ctl( m_encoder, OPUS_SET_BITRATE( m_bitRate ) );
+	}
 }
 
 
