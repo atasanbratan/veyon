@@ -3,7 +3,7 @@
  * with the real microphone and headset, and reports packet flow. Also checks that a wrong token
  * is rejected.
  *
- * Usage: labaudio_loopback [seconds] [listen|talk|speak]
+ * Usage: labaudio_loopback [seconds] [listen|talk|speak] [record]
  *   speak  (default) teacher microphone -> student headset   (= "Speak to students")
  *   listen student microphone -> teacher headset              (= "Listen to student")
  *   talk   both directions                                    (= "Talk with student")
@@ -43,6 +43,13 @@ int main( int argc, char** argv )
 	{
 		std::printf( "FAIL  hub could not listen on %d\n", port );
 		return 1;
+	}
+
+	// Optional 3rd argument "record": records the conversation (folder: LABAUDIO_RECORDINGS_DIR or Documents).
+	if( argc > 3 && QByteArray( argv[3] ) == "record" )
+	{
+		hub.setRecording( true, false, { { 0, QStringLiteral( "Loopback test" ) } } );
+		std::printf( "recording to %s\n", qUtf8Printable( hub.recordingPaths().value( 0 ) ) );
 	}
 
 	int teacherSent = 0, studentReceived = 0, hubReceived = 0;

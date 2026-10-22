@@ -68,6 +68,7 @@ private:
 	QLabel* m_title;
 	QLabel* m_status;
 	QLabel* m_teacher{nullptr};
+	QLabel* m_recording{nullptr};
 	QProgressBar* m_level{nullptr};
 	QSlider* m_volume{nullptr};
 	QPushButton* m_call{nullptr};

@@ -30,6 +30,7 @@
 
 #include "LabAudioCrypto.h"
 #include "LabAudioProtocol.h"
+#include "LabAudioRecorder.h"
 
 class QTcpServer;
 class QTcpSocket;
@@ -57,6 +58,10 @@ public:
 	void setFocus( int focusGroup, bool teacherTalks );
 	// Mutes the teacher's microphone (silence keeps flowing so students' buffers stay steady).
 	void setTeacherMuted( bool muted );
+	// conversation: what the teacher hears and says; groups: one file per group. labels: 0 = conversation,
+	// group id = that group (a changed label starts a new file).
+	void setRecording( bool conversation, bool groups, const QHash<int, QString>& labels );
+	QStringList recordingPaths() const;
 
 	static constexpr int MaxClients = 100;
 	static constexpr qint64 MaxQueuedBytes = 64 * 1024;	// drop audio to a client that falls behind
@@ -67,6 +72,7 @@ Q_SIGNALS:
 	void teacherPacketSent( int receivers );
 	void studentPacketReceived( int clientId );
 	void peerPacketForwarded( int sourceId, int receivers );
+	void recordingChanged();
 
 private:
 	struct Client
@@ -93,6 +99,9 @@ private:
 	void sendStatus( int id );
 	bool hearsTeacher( const Client& client ) const;
 	bool teacherHears( const Client& client ) const;
+	bool isRecorded( const Client& client ) const;
+	void updateRecorders();
+	void sendStatusToAll();
 
 	QTcpServer* m_server{nullptr};
 	QByteArray m_token;
@@ -100,6 +109,11 @@ private:
 	int m_focusGroup{NoGroup};
 	bool m_teacherTalks{false};
 	bool m_teacherMuted{false};
+	bool m_recordConversation{false};
+	bool m_recordGroups{false};
+	QHash<int, QString> m_recordingLabels;
+	LabAudioRecorder* m_conversationRecorder{nullptr};
+	QHash<int, LabAudioRecorder*> m_groupRecorders;
 	QHash<int, Client> m_clients;
 	int m_nextId{1};
 	quint32 m_sequence{0};

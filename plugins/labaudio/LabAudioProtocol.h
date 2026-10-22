@@ -70,7 +70,8 @@ enum RoleFlag : quint8
 enum StatusFlag : quint8
 {
 	TeacherListening = 0x01,
-	TeacherTalking = 0x02
+	TeacherTalking = 0x02,
+	Recording = 0x04	// what this student hears or says is being recorded on the teacher computer
 };
 
 // Source id 0 is the teacher; group members use their hub client id.

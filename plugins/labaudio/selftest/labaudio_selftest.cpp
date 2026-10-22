@@ -13,6 +13,10 @@
 #include <QCoreApplication>
 #include <QAudioDevice>
 #include <QMediaDevices>
+#include <QDir>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QtEndian>
 #include <QtMath>
 #include <cstdio>
 
@@ -22,6 +26,7 @@
 #include "../LabAudioCrypto.h"
 #include "../LabAudioEngine.h"
 #include "../LabAudioProtocol.h"
+#include "../LabAudioRecorder.h"
 
 using namespace LabAudioProtocol;
 
@@ -310,6 +315,128 @@ static void testCrypto()
 
 
 
+// Minimal Ogg reader for checking recordings: returns the packets, verifies every page checksum.
+struct OggCheck
+{
+	QList<QByteArray> packets;
+	QList<qint64> granules;	// per page
+	QList<quint8> headerTypes;
+	bool checksumsOk{true};
+	bool sequenceOk{true};
+};
+
+static OggCheck readOgg( const QString& path )
+{
+	OggCheck result;
+	QFile file( path );
+	if( file.open( QFile::ReadOnly ) == false )
+	{
+		result.checksumsOk = false;
+		return result;
+	}
+	const auto data = file.readAll();
+	qsizetype pos = 0;
+	quint32 expectedSequence = 0;
+	QByteArray partial;
+	while( pos + 27 <= data.size() && data.mid( pos, 4 ) == "OggS" )
+	{
+		const auto segments = quint8( data.at( pos + 26 ) );
+		const auto headerSize = 27 + segments;
+		qsizetype bodySize = 0;
+		for( int i = 0; i < segments; ++i )
+		{
+			bodySize += quint8( data.at( pos + 27 + i ) );
+		}
+		auto page = data.mid( pos, headerSize + bodySize );
+		const auto storedCrc = qFromLittleEndian<quint32>( page.constData() + 22 );
+		qToLittleEndian( quint32( 0 ), page.data() + 22 );
+		result.checksumsOk &= LabAudioOggOpusWriter::crc( page ) == storedCrc;
+		result.sequenceOk &= qFromLittleEndian<quint32>( page.constData() + 18 ) == expectedSequence++;
+		result.headerTypes.append( quint8( page.at( 5 ) ) );
+		result.granules.append( qFromLittleEndian<qint64>( page.constData() + 6 ) );
+		qsizetype offset = headerSize;
+		for( int i = 0; i < segments; ++i )
+		{
+			const auto length = quint8( page.at( 27 + i ) );
+			partial += page.mid( offset, length );
+			offset += length;
+			if( length < 255 )
+			{
+				result.packets.append( partial );
+				partial.clear();
+			}
+		}
+		pos += headerSize + bodySize;
+	}
+	return result;
+}
+
+static void testRecording()
+{
+	CHECK( LabAudioOggOpusWriter::crc( QByteArrayLiteral( "123456789" ) ) == 0x89a1897f,
+		   "Ogg checksum matches the CRC-32 reference value" );
+
+	const auto path = QDir::temp().filePath( QStringLiteral( "labaudio-selftest.opus" ) );
+	{
+		int err = 0;
+		auto encoder = opus_encoder_create( SampleRate, Channels, OPUS_APPLICATION_VOIP, &err );
+		LabAudioRecorder recorder( path, QStringLiteral( "Selftest – Grüße" ) );
+		CHECK( recorder.isRecording(), "recording file created" );
+		// 2 s of a sine sent in real time, like a microphone stream.
+		QElapsedTimer clock;
+		clock.start();
+		int sent = 0;
+		while( clock.elapsed() < 2000 )
+		{
+			while( sent < clock.elapsed() / 20 )
+			{
+				recorder.addPacket( 7, quint32( sent ), encodeSineFrame( encoder, sent ) );
+				++sent;
+			}
+			QCoreApplication::processEvents( QEventLoop::AllEvents, 5 );
+		}
+		opus_encoder_destroy( encoder );
+	}
+
+	const auto ogg = readOgg( path );
+	CHECK( ogg.checksumsOk && ogg.sequenceOk && ogg.packets.size() > 90, "file consists of valid Ogg pages" );
+	CHECK( ogg.packets.value( 0 ).startsWith( "OpusHead" ) && ogg.packets.value( 0 ).size() == 19 &&
+		   quint8( ogg.packets.value( 0 ).at( 9 ) ) == 1 &&
+		   qFromLittleEndian<quint32>( ogg.packets.value( 0 ).constData() + 12 ) == 48000 &&
+		   ogg.headerTypes.value( 0 ) == 0x02,
+		   "OpusHead: version 1, mono, 48 kHz, first page" );
+	CHECK( ogg.packets.value( 1 ).startsWith( "OpusTags" ) &&
+		   ogg.packets.value( 1 ).contains( QStringLiteral( "TITLE=Selftest – Grüße" ).toUtf8() ),
+		   "OpusTags with the recording title (UTF-8)" );
+	CHECK( ogg.headerTypes.last() == 0x04, "last page marks the end of the stream" );
+
+	int err = 0;
+	auto decoder = opus_decoder_create( SampleRate, Channels, &err );
+	QByteArray pcm;
+	opus_int16 frame[FrameSamples];
+	for( int i = 2; i < ogg.packets.size(); ++i )
+	{
+		const auto n = opus_decode( decoder, reinterpret_cast<const unsigned char*>( ogg.packets[i].constData() ),
+									int( ogg.packets[i].size() ), frame, FrameSamples, 0 );
+		if( n > 0 )
+		{
+			pcm.append( reinterpret_cast<const char*>( frame ), n * 2 );
+		}
+	}
+	opus_decoder_destroy( decoder );
+	const auto audioPackets = ogg.packets.size() - 2;
+	const auto preSkip = qFromLittleEndian<quint16>( ogg.packets.value( 0 ).constData() + 10 );
+	std::printf( "      recorded %lld packets (%.2f s), granule %lld, pre-skip %d, RMS of the second half %.3f\n",
+				 qint64( audioPackets ), audioPackets * 0.02, ogg.granules.last(), preSkip,
+				 rms( pcm.mid( pcm.size() / 2 ) ) );
+	CHECK( audioPackets >= 95 && audioPackets <= 102, "about 2 s recorded (100 packets of 20 ms)" );
+	CHECK( ogg.granules.last() == preSkip + qint64( audioPackets ) * FrameSamples, "granule position counts all samples" );
+	CHECK( rms( pcm.mid( pcm.size() / 2 ) ) > 0.25, "recorded audio is the sine at the expected level" );
+	QFile::remove( path );
+}
+
+
+
 static void testCallBoard()
 {
 	LabAudioCallBoard board;
@@ -341,10 +468,33 @@ int main( int argc, char** argv )
 		for( const auto& d : QMediaDevices::audioOutputs() ) { std::printf( "output: %s\n", qPrintable( d.description() ) ); }
 		return 0;
 	}
+	if( argc > 2 && QByteArray( argv[1] ) == "--check-ogg" )
+	{
+		// Checks a recording made by Veyon: page checksums, headers, length and level.
+		const auto ogg = readOgg( QString::fromLocal8Bit( argv[2] ) );
+		int err = 0;
+		auto decoder = opus_decoder_create( SampleRate, Channels, &err );
+		QByteArray pcm;
+		opus_int16 frame[FrameSamples];
+		for( int i = 2; i < ogg.packets.size(); ++i )
+		{
+			const auto n = opus_decode( decoder, reinterpret_cast<const unsigned char*>( ogg.packets[i].constData() ),
+										int( ogg.packets[i].size() ), frame, FrameSamples, 0 );
+			pcm.append( reinterpret_cast<const char*>( frame ), qMax( 0, n ) * 2 );
+		}
+		opus_decoder_destroy( decoder );
+		std::printf( "checksums %s, page order %s, head %s, end marker %s, %.1f s, RMS %.3f\n",
+					 ogg.checksumsOk ? "ok" : "BAD", ogg.sequenceOk ? "ok" : "BAD",
+					 ogg.packets.value( 0 ).startsWith( "OpusHead" ) ? "ok" : "BAD",
+					 ogg.headerTypes.value( ogg.headerTypes.size() - 1 ) == 0x04 ? "ok" : "missing",
+					 ( ogg.packets.size() - 2 ) * 0.02, rms( pcm ) );
+		return ogg.checksumsOk && ogg.sequenceOk ? 0 : 1;
+	}
 	testFraming();
 	testMixer();
 	testCrypto();
 	testCallBoard();
+	testRecording();
 	std::printf( failures ? "\n%d FAILED\n" : "\nALL PASSED\n", failures );
 	return failures ? 1 : 0;
 }

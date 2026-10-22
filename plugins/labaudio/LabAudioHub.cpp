@@ -24,6 +24,7 @@
 
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QSet>
 #include <QTimer>
 #include <QtEndian>
 
@@ -94,6 +95,135 @@ void LabAudioHub::setTeacherMuted( bool muted )
 
 
 
+void LabAudioHub::setRecording( bool conversation, bool groups, const QHash<int, QString>& labels )
+{
+	if( conversation == m_recordConversation && groups == m_recordGroups && labels == m_recordingLabels )
+	{
+		return;
+	}
+	m_recordConversation = conversation;
+	m_recordGroups = groups;
+	m_recordingLabels = labels;
+	updateRecorders();
+}
+
+
+
+QStringList LabAudioHub::recordingPaths() const
+{
+	QStringList paths;
+	if( m_conversationRecorder )
+	{
+		paths.append( m_conversationRecorder->path() );
+	}
+	for( const auto recorder : m_groupRecorders )
+	{
+		paths.append( recorder->path() );
+	}
+	return paths;
+}
+
+
+
+void LabAudioHub::updateRecorders()
+{
+	bool changed = false;
+	const auto startRecorder = [this]( int key ) {
+		const auto label = m_recordingLabels.value( key );
+		auto recorder = new LabAudioRecorder( LabAudioRecorder::newRecordingPath( label ), label, this );
+		if( recorder->isRecording() )
+		{
+			vWarning() << "LabAudio: recording to" << recorder->path();
+		}
+		else
+		{
+			vCritical() << "LabAudio: could not create recording" << recorder->path();
+		}
+		return recorder;
+	};
+
+	// A changed label (e.g. talking with another student, new groups) starts a new file.
+	if( m_conversationRecorder &&
+		( m_recordConversation == false || m_conversationRecorder->title() != m_recordingLabels.value( 0 ) ) )
+	{
+		delete m_conversationRecorder;
+		m_conversationRecorder = nullptr;
+		changed = true;
+	}
+	if( m_recordConversation && m_conversationRecorder == nullptr )
+	{
+		m_conversationRecorder = startRecorder( 0 );
+		changed = true;
+	}
+
+	QSet<int> groups;
+	if( m_recordGroups )
+	{
+		for( const auto group : std::as_const( m_groupTokens ) )
+		{
+			groups.insert( group );
+		}
+	}
+	for( auto it = m_groupRecorders.begin(); it != m_groupRecorders.end(); )
+	{
+		if( groups.contains( it.key() ) == false || it.value()->title() != m_recordingLabels.value( it.key() ) )
+		{
+			delete it.value();
+			it = m_groupRecorders.erase( it );
+			changed = true;
+		}
+		else
+		{
+			++it;
+		}
+	}
+	for( const auto group : std::as_const( groups ) )
+	{
+		if( m_groupRecorders.contains( group ) == false )
+		{
+			m_groupRecorders.insert( group, startRecorder( group ) );
+			changed = true;
+		}
+	}
+
+	if( changed )
+	{
+		sendStatusToAll();
+		Q_EMIT recordingChanged();
+	}
+}
+
+
+
+bool LabAudioHub::isRecorded( const Client& client ) const
+{
+	if( client.authenticated == false )
+	{
+		return false;
+	}
+	if( m_conversationRecorder && ( hearsTeacher( client ) || teacherHears( client ) ) )
+	{
+		return true;
+	}
+	return client.group != ClassGroup && m_groupRecorders.contains( client.group );
+}
+
+
+
+void LabAudioHub::sendStatusToAll()
+{
+	const auto ids = m_clients.keys();
+	for( const auto id : ids )
+	{
+		if( m_clients.value( id ).authenticated )
+		{
+			sendStatus( id );
+		}
+	}
+}
+
+
+
 bool LabAudioHub::isListening() const
 {
 	return m_server->isListening();
@@ -132,6 +262,7 @@ void LabAudioHub::setGroups( const QHash<QByteArray, int>& groupTokens )
 		}
 	}
 	updateAudio();
+	updateRecorders();
 }
 
 
@@ -199,12 +330,12 @@ bool LabAudioHub::teacherHears( const Client& client ) const
 void LabAudioHub::sendStatus( int id )
 {
 	auto& client = m_clients[id];
-	if( client.socket.isNull() || client.group == ClassGroup )
+	if( client.socket.isNull() )
 	{
 		return;
 	}
-	quint8 flags = 0;
-	if( client.group == m_focusGroup )
+	quint8 flags = isRecorded( client ) ? Recording : 0;
+	if( client.group != ClassGroup && client.group == m_focusGroup )
 	{
 		flags |= TeacherListening;
 		if( m_teacherTalks )
@@ -305,11 +436,22 @@ void LabAudioHub::readClient( int id )
 		if( type == FrameType::Audio && ( client.roles & SendMicrophone ) && payload.size() > 4 &&
 			payload.size() <= 4 + MaxFrameBytes )
 		{
-			if( m_playback && teacherHears( client ) )
+			const auto sequence = qFromBigEndian<quint32>( payload.constData() );
+			if( teacherHears( client ) )
 			{
-				const auto sequence = qFromBigEndian<quint32>( payload.constData() );
-				m_playback->mixer().addPacket( id, sequence, payload.mid( 4 ) );
-				Q_EMIT studentPacketReceived( id );
+				if( m_playback )
+				{
+					m_playback->mixer().addPacket( id, sequence, payload.mid( 4 ) );
+					Q_EMIT studentPacketReceived( id );
+				}
+				if( m_conversationRecorder )
+				{
+					m_conversationRecorder->addPacket( id, sequence, payload.mid( 4 ) );
+				}
+			}
+			if( auto recorder = m_groupRecorders.value( client.group ) )
+			{
+				recorder->addPacket( id, sequence, payload.mid( 4 ) );
 			}
 			if( client.group != ClassGroup )
 			{
@@ -429,6 +571,14 @@ void LabAudioHub::dropClient( int id )
 	{
 		m_playback->mixer().removeStream( id );
 	}
+	if( m_conversationRecorder )
+	{
+		m_conversationRecorder->removeStream( id );
+	}
+	if( auto recorder = m_groupRecorders.value( client.group ) )
+	{
+		recorder->removeStream( id );
+	}
 	updateAudio();
 }
 
@@ -479,7 +629,19 @@ void LabAudioHub::updateAudio()
 
 void LabAudioHub::sendTeacherPacket( const QByteArray& packet )
 {
-	const auto payload = audioPayload( m_sequence++, packet );
+	const auto sequence = m_sequence++;
+	const auto payload = audioPayload( sequence, packet );
+	if( m_conversationRecorder )
+	{
+		m_conversationRecorder->addPacket( TeacherStreamId, sequence, packet );
+	}
+	if( m_teacherTalks )
+	{
+		if( auto recorder = m_groupRecorders.value( m_focusGroup ) )
+		{
+			recorder->addPacket( TeacherStreamId, sequence, packet );
+		}
+	}
 	int receivers = 0;
 	for( auto& client : m_clients )
 	{

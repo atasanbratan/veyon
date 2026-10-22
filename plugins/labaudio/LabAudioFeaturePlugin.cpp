@@ -23,11 +23,13 @@
  */
 
 #include <QCoreApplication>
+#include <QDesktopServices>
 #include <QMessageBox>
 #include <QNetworkInterface>
 #include <QSettings>
 #include <QTcpSocket>
 #include <QTimeZone>
+#include <QUrl>
 
 #include "ComputerControlInterface.h"
 #include "FeatureWorkerManager.h"
@@ -35,6 +37,7 @@
 #include "LabAudioFeaturePlugin.h"
 #include "LabAudioHub.h"
 #include "LabAudioProtocol.h"
+#include "LabAudioRecorder.h"
 #include "Logger.h"
 #include "PlatformPluginInterface.h"
 #include "PlatformSessionFunctions.h"
@@ -208,13 +211,63 @@ void LabAudioFeaturePlugin::showTeacherPanel( VeyonMasterInterface& master, cons
 		m_teacherPanel = new LabAudioTeacherPanel( master.mainWindow() );
 		connect( m_teacherPanel->micControls(), &LabAudioMicControls::mutedChanged,
 				 this, &LabAudioFeaturePlugin::setTeacherMuted );
+		connect( m_teacherPanel, &LabAudioTeacherPanel::recordToggled, this, &LabAudioFeaturePlugin::setRecordConversation );
+		connect( m_teacherPanel, &LabAudioTeacherPanel::openRecordingsRequested, this, &LabAudioFeaturePlugin::openRecordings );
 	}
-	const auto description = ( feature == m_talkFeature )
-								 ? tr( "You are talking with %1." ).arg( studentName( master.selectedComputerControlInterfaces().value( 0 ) ) )
-								 : tr( "You are speaking to the students." );
+	const auto student = studentName( master.selectedComputerControlInterfaces().value( 0 ) );
+	QString description;
+	if( feature == m_talkFeature )
+	{
+		description = tr( "You are talking with %1." ).arg( student );
+		m_conversationLabel = tr( "Talk with %1" ).arg( student );
+	}
+	else if( feature == m_listenFeature )
+	{
+		description = tr( "You are listening to %1." ).arg( student );
+		m_conversationLabel = tr( "Listening to %1" ).arg( student );
+	}
+	else
+	{
+		description = tr( "You are speaking to the students." );
+		m_conversationLabel = tr( "Lesson" );
+	}
 	m_teacherPanel->setMode( description, tr( "To stop, click \"%1\" in the toolbar again." ).arg( feature.displayName() ) );
+	m_teacherPanel->setMicAvailable( feature != m_listenFeature );
+	m_teacherPanel->setRecording( m_recordConversation );
 	m_teacherPanel->show();
 	m_teacherPanel->raise();
+}
+
+
+
+void LabAudioFeaturePlugin::setRecordConversation( bool record )
+{
+	m_recordConversation = record;
+	sendHubCommand();
+	if( m_teacherPanel )
+	{
+		m_teacherPanel->setRecording( record );
+	}
+}
+
+
+
+void LabAudioFeaturePlugin::setRecordGroups( bool record )
+{
+	m_recordGroups = record;
+	sendHubCommand();
+	if( m_groupPanel )
+	{
+		m_groupPanel->setRecording( record );
+	}
+}
+
+
+
+void LabAudioFeaturePlugin::openRecordings()
+{
+	// Veyon Master runs as the same user as the teacher's hub, so this is the folder it records to.
+	QDesktopServices::openUrl( QUrl::fromLocalFile( LabAudioRecorder::recordingsFolder() ) );
 }
 
 
@@ -324,9 +377,13 @@ void LabAudioFeaturePlugin::sendHubCommand()
 	{
 		// Repeated periodically so a crashed hub worker is restarted with the same token.
 		QVariantMap groupTokens;
+		// File labels; a group's label contains its members, so new groups start new files.
+		QVariantMap recordingLabels{ { QStringLiteral( "0" ), m_conversationLabel } };
 		for( int g = 0; g < m_groups.size(); ++g )
 		{
 			groupTokens[QString::fromLatin1( m_groups[g].token.toHex() )] = g + 1;
+			recordingLabels[QString::number( g + 1 )] =
+				tr( "Group %1 - %2" ).arg( g + 1 ).arg( m_groups[g].names.join( QStringLiteral( ", " ) ) );
 		}
 		sendFeatureMessage( FeatureMessage{ m_hubFeature.uid(), FeatureCommand::StartHub }
 								.addArgument( Argument::Token, m_token )
@@ -334,7 +391,10 @@ void LabAudioFeaturePlugin::sendHubCommand()
 								.addArgument( Argument::GroupTokens, groupTokens )
 								.addArgument( Argument::FocusGroup, m_focusGroup )
 								.addArgument( Argument::TeacherTalks, m_teacherTalks )
-								.addArgument( Argument::TeacherMuted, m_teacherMuted ),
+								.addArgument( Argument::TeacherMuted, m_teacherMuted )
+								.addArgument( Argument::RecordConversation, m_recordConversation )
+								.addArgument( Argument::RecordGroups, m_recordGroups )
+								.addArgument( Argument::RecordingLabels, recordingLabels ),
 							m_hubInterfaces );
 	}
 	else
@@ -642,7 +702,10 @@ bool LabAudioFeaturePlugin::startGroupWork( VeyonMasterInterface& master,
 		connect( m_groupPanel, &LabAudioGroupPanel::regroupRequested, this, &LabAudioFeaturePlugin::regroup );
 		connect( m_groupPanel->micControls(), &LabAudioMicControls::mutedChanged,
 				 this, &LabAudioFeaturePlugin::setTeacherMuted );
+		connect( m_groupPanel, &LabAudioGroupPanel::recordToggled, this, &LabAudioFeaturePlugin::setRecordGroups );
+		connect( m_groupPanel, &LabAudioGroupPanel::openRecordingsRequested, this, &LabAudioFeaturePlugin::openRecordings );
 	}
+	m_groupPanel->setRecording( m_recordGroups );
 	QList<QStringList> groupNames;
 	for( const auto& group : std::as_const( m_groups ) )
 	{
@@ -784,10 +847,7 @@ bool LabAudioFeaturePlugin::startMode( VeyonMasterInterface& master, const Featu
 		startClient( target, m_token, roles );
 	}
 	++m_activeModes;
-	if( roles & ReceiveTeacher )
-	{
-		showTeacherPanel( master, feature );
-	}
+	showTeacherPanel( master, feature );
 	return true;
 }
 
@@ -814,6 +874,9 @@ bool LabAudioFeaturePlugin::stopFeature( VeyonMasterInterface& master, const Fea
 		{
 			m_activeModes = 0;
 			m_teacherMuted = false;
+			// Recording never carries over into the next mode without the teacher asking.
+			m_recordConversation = false;
+			m_recordGroups = false;
 			controlFeature( m_hubFeature.uid(), Operation::Stop, {},
 							{ master.localSessionControlInterface().weakPointer() } );
 		}
@@ -958,6 +1021,14 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonWorkerInterface& worker, 
 																		 : LabAudioHub::NoGroup,
 							 message.argument( Argument::TeacherTalks ).toBool() );
 			m_hub->setTeacherMuted( message.argument( Argument::TeacherMuted ).toBool() );
+			QHash<int, QString> labels;
+			const auto labelMap = message.argument( Argument::RecordingLabels ).toMap();
+			for( auto it = labelMap.cbegin(); it != labelMap.cend(); ++it )
+			{
+				labels.insert( it.key().toInt(), it.value().toString() );
+			}
+			m_hub->setRecording( message.argument( Argument::RecordConversation ).toBool(),
+								 message.argument( Argument::RecordGroups ).toBool(), labels );
 			return true;
 		}
 		case FeatureCommand::StopHub:

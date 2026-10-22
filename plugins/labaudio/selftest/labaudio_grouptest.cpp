@@ -12,7 +12,9 @@
  */
 
 #include <QApplication>
+#include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QTcpSocket>
 #include <QtEndian>
 #include <cstdio>
@@ -121,6 +123,9 @@ public:
 int main( int argc, char** argv )
 {
 	QApplication app( argc, argv );
+	const auto recordingsDir = QDir::temp().filePath( QStringLiteral( "labaudio-grouptest-recordings" ) );
+	QDir( recordingsDir ).removeRecursively();
+	qputenv( "LABAUDIO_RECORDINGS_DIR", recordingsDir.toLocal8Bit() );
 
 	// --ui <dir>: render the teacher's dialog and panel to PNG files for a visual check.
 	if( argc > 2 && QByteArray( argv[1] ) == "--ui" )
@@ -157,7 +162,7 @@ int main( int argc, char** argv )
 
 		LabAudioIndicator group( SendMicrophone | ReceivePeers | ReceiveTeacher, { QStringLiteral( "Ben Koch" ) } );
 		group.setStatus( QStringLiteral( "Connected" ) );
-		group.setTeacherStatus( TeacherListening );
+		group.setTeacherStatus( TeacherListening | Recording );
 		group.setLevel( 0.4f );
 		wait( 200 );
 		group.grab().save( dir + QStringLiteral( "/student-group.png" ) );
@@ -249,6 +254,20 @@ int main( int argc, char** argv )
 	CHECK( carla.status.value( carla.status.size() - 1 ) == ( TeacherListening | TeacherTalking ),
 		   "group 2 sees that the teacher joined" );
 
+	// Recording each group: one file per group, the members see it, the class student does not.
+	hub.setRecording( false, true, { { 1, QStringLiteral( "Group 1 - Anna, Ben" ) }, { 2, QStringLiteral( "Group 2 - Carla, Dan" ) } } );
+	wait( 300 );
+	const auto recordingFlag = []( const FakeStudent& student ) {
+		return student.status.isEmpty() == false && ( student.status.last() & Recording );
+	};
+	CHECK( recordingFlag( anna ) && recordingFlag( ben ) && recordingFlag( carla ) && recordingFlag( dan ),
+		   "every group member sees that the group is recorded" );
+	CHECK( recordingFlag( classStudent ) == false, "the class student is not told about a recording" );
+	const auto paths = hub.recordingPaths();
+	CHECK( paths.size() == 2 && QFile::exists( paths.value( 0 ) ) && QFile::exists( paths.value( 1 ) ) &&
+		   paths.join( QLatin1Char( '|' ) ).contains( QStringLiteral( "Group 2 - Carla, Dan.opus" ) ),
+		   "one recording file per group, named after the group" );
+
 	// Regrouping: new tokens, all old group members are disconnected, the class student stays.
 	hub.setFocus( LabAudioHub::NoGroup, false );
 	hub.setGroups( { { QByteArrayLiteral( "new-group-token-0123456789" ), 1 } } );
@@ -256,6 +275,15 @@ int main( int argc, char** argv )
 	CHECK( anna.disconnected && ben.disconnected && carla.disconnected && dan.disconnected,
 		   "regrouping disconnects the old groups" );
 	CHECK( classStudent.disconnected == false, "class student stays connected" );
+	CHECK( hub.recordingPaths().size() == 1, "the recording of a group that no longer exists is closed" );
+
+	hub.setRecording( false, false, {} );
+	wait( 100 );
+	QFile closed( paths.value( 1 ) );
+	const bool opened = closed.open( QFile::ReadOnly );
+	const auto closedData = closed.readAll();
+	CHECK( opened && hub.recordingPaths().isEmpty() && closedData.startsWith( "OggS" ) && closedData.contains( "OpusHead" ),
+		   "stopping the recording leaves complete Ogg Opus files" );
 
 	std::printf( failures ? "\n%d FAILED\n" : "\nALL PASSED\n", failures );
 	return failures ? 1 : 0;

@@ -29,6 +29,20 @@ Starting another mode on a computer replaces its previous mode. "Stop" on the gr
   **Push to talk** (hold the button or Space while the panel is active). Muting sends silent frames so the
   students' jitter buffers do not treat the pause as network jitter.
 
+### Recording
+
+- **● Record** in the teacher panel (Speak, Talk, Listen) records the conversation: what the teacher hears plus the
+  teacher's microphone, mixed into one file. **● Record each group** in the group panel records every group into its
+  own file (members plus the teacher while talking with that group), e.g. for oral exams.
+- Files: `Documents\Lab audio recordings\<date time> <label>.opus` on the teacher PC (label e.g. "Talk with Anna",
+  "Group 2 - Carla, Dan"); Ogg Opus, 32 kbit/s mono (≈ 2.4 MB per 10 minutes). **Recordings…** opens the folder.
+  Another student or new groups start a new file.
+- The hub mixes the decrypted streams with the same jitter-buffered mixer as playback, driven by the wall clock (one
+  20 ms frame per 20 ms), and writes the Ogg pages itself (`LabAudioOggOpusWriter`, RFC 3533 / RFC 7845, one page
+  per second, so a file stays playable even if the hub is killed).
+- Students always see "● This conversation is being recorded" (`Recording` status flag). Recording never carries
+  over into the next mode.
+
 ### Group work
 
 A dialog asks for the group size (2–6, default pairs) and whether to mix students randomly; a single student left over
@@ -75,7 +89,8 @@ Veyon Master (teacher)                    Veyon Server (each PC)            Work
 ## Wire protocol (`LabAudioProtocol.h`)
 
 `[u32 length][u8 type][payload]` over TCP (Nagle disabled). Types: Hello (version, key id, client nonce), HelloAck (accepted, hub nonce), Auth (roles),
-Audio (u32 sequence + Opus packet), Bye, Status (u8 teacher flags), PeerAudio (u32 source id + Audio payload), CallTeacher (u8 calling + UTF-8 name). Max payload 8 KiB; Hello and Auth must arrive within 5 s. From the Auth frame on, every frame is `Encrypted`.
+Audio (u32 sequence + Opus packet), Bye, Status (u8 teacher and recording flags), PeerAudio (u32 source id + Audio
+payload); calls travel through Veyon, not this connection. Max payload 8 KiB; Hello and Auth must arrive within 5 s. From the Auth frame on, every frame is `Encrypted`.
 
 ## Security
 
@@ -99,6 +114,5 @@ Audio (u32 sequence + Opus packet), Bye, Status (u8 teacher flags), PeerAudio (u
 
 ## Wait list
 
-- Recording (lesson, oral exam answers).
 - Configuration page (port is fixed at 11500 + session id, audio quality).
 - Translations.

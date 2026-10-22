@@ -96,10 +96,17 @@ public:
 	explicit LabAudioTeacherPanel( QWidget* parent = nullptr );
 
 	void setMode( const QString& description, const QString& stopHint );
+	// Listening only: the teacher's microphone is not used.
+	void setMicAvailable( bool available );
+	void setRecording( bool recording );
 	LabAudioMicControls* micControls() const
 	{
 		return m_mic;
 	}
+
+Q_SIGNALS:
+	void recordToggled( bool record );
+	void openRecordingsRequested();
 
 protected:
 	void closeEvent( QCloseEvent* event ) override;
@@ -110,6 +117,7 @@ private:
 	QLabel* m_mode;
 	QLabel* m_hint;
 	LabAudioMicControls* m_mic;
+	QPushButton* m_record;
 };
 
 // Stays next to Veyon Master during group work: lets the teacher listen to or join one group.
@@ -127,11 +135,14 @@ public:
 	// One entry per group (group id = index + 1) with the member names.
 	void setGroups( const QList<QStringList>& groups );
 	void setFocus( int groupId, bool talking );
+	void setRecording( bool recording );
 
 Q_SIGNALS:
 	// groupId < 0: stop listening/talking
 	void focusRequested( int groupId, bool talk );
 	void regroupRequested();
+	void recordToggled( bool record );
+	void openRecordingsRequested();
 
 protected:
 	void closeEvent( QCloseEvent* event ) override;
@@ -149,6 +160,7 @@ private:
 	QLabel* m_state;
 	QGridLayout* m_grid;
 	LabAudioMicControls* m_mic;
+	QPushButton* m_record;
 	QList<Row> m_rows;
 	int m_focusGroup{-1};
 	bool m_talking{false};

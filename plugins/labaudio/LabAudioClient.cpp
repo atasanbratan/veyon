@@ -91,6 +91,10 @@ LabAudioIndicator::LabAudioIndicator( quint8 roles, const QStringList& groupMemb
 		m_teacher->hide();
 		layout->addWidget( m_teacher );
 	}
+	m_recording = new QLabel( tr( "● This conversation is being recorded." ), this );
+	m_recording->setStyleSheet( QStringLiteral( "color: #f87171; font-weight: bold;" ) );
+	m_recording->hide();
+	layout->addWidget( m_recording );
 	layout->addWidget( m_status );
 	m_status->setText( tr( "Connecting…" ) );
 
@@ -208,8 +212,11 @@ void LabAudioIndicator::setLevel( float level )
 
 void LabAudioIndicator::setTeacherStatus( quint8 statusFlags )
 {
+	// Students always see when they are being recorded.
+	m_recording->setVisible( statusFlags & Recording );
 	if( m_teacher == nullptr )
 	{
+		placeOnScreen();
 		return;
 	}
 	if( statusFlags & TeacherTalking )

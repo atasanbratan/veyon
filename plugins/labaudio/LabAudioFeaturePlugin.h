@@ -61,7 +61,10 @@ public:
 		TeacherMuted,
 		Calling,
 		CallsAllowed,
-		CallTime	// LongLong: milliseconds since epoch (UTC)
+		CallTime,	// LongLong: milliseconds since epoch (UTC)
+		RecordConversation,
+		RecordGroups,
+		RecordingLabels	// QVariantMap: "0" = conversation, group id = group -> file label
 	};
 	Q_ENUM(Argument)
 
@@ -166,6 +169,9 @@ private:
 					  const QStringList& groupMembers = {} );
 	void showTeacherPanel( VeyonMasterInterface& master, const Feature& feature );
 	void setTeacherMuted( bool muted );
+	void setRecordConversation( bool record );
+	void setRecordGroups( bool record );
+	void openRecordings();
 	void sendHubCommand();
 	int hubPort() const;
 	static QStringList localAddresses();
@@ -209,6 +215,9 @@ private:
 	QPointer<LabAudioGroupPanel> m_groupPanel;
 	QPointer<LabAudioTeacherPanel> m_teacherPanel;
 	bool m_teacherMuted{false};
+	bool m_recordConversation{false};
+	bool m_recordGroups{false};
+	QString m_conversationLabel;
 
 	// calling the teacher: Veyon Server
 	LabAudioCallBoard m_callBoard;

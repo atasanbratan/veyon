@@ -33,10 +33,12 @@
 #include <QListWidget>
 #include <QPushButton>
 #include <QRandomGenerator>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <functional>
 
 #include "LabAudioGroupWork.h"
 #include "LabAudioProtocol.h"
@@ -154,6 +156,26 @@ bool handleSpace( LabAudioMicControls* mic, QKeyEvent* event, bool pressed )
 	return true;
 }
 
+// "● Record" toggle and "Recordings…" (opens the folder) side by side.
+QHBoxLayout* recordRow( QWidget* parent, QPushButton*& record, const QString& text, const QString& toolTip,
+					   const std::function<void( bool )>& toggled, const std::function<void()>& openFolder )
+{
+	auto row = new QHBoxLayout;
+	record = new QPushButton( text, parent );
+	record->setCheckable( true );
+	record->setFocusPolicy( Qt::NoFocus );
+	record->setToolTip( toolTip );
+	record->setStyleSheet( QStringLiteral( "QPushButton:checked { color: white; background: #b91c1c; }" ) );
+	QObject::connect( record, &QPushButton::toggled, parent, toggled );
+	auto folder = new QPushButton( QObject::tr( "Recordings…" ), parent );
+	folder->setFocusPolicy( Qt::NoFocus );
+	folder->setToolTip( QObject::tr( "Open the folder with the recordings (Documents, \"Lab audio recordings\")" ) );
+	QObject::connect( folder, &QPushButton::clicked, parent, openFolder );
+	row->addWidget( record, 1 );
+	row->addWidget( folder );
+	return row;
+}
+
 }
 
 
@@ -240,7 +262,29 @@ LabAudioTeacherPanel::LabAudioTeacherPanel( QWidget* parent ) :
 	m_hint->setEnabled( false );
 	layout->addWidget( m_mode );
 	layout->addWidget( m_mic );
+	layout->addLayout( recordRow( this, m_record, tr( "● Record" ),
+								  tr( "Record this conversation to a file on this computer. The students see that "
+									  "they are being recorded." ),
+								  [this]( bool record ) { Q_EMIT recordToggled( record ); },
+								  [this]() { Q_EMIT openRecordingsRequested(); } ) );
 	layout->addWidget( m_hint );
+}
+
+
+
+void LabAudioTeacherPanel::setMicAvailable( bool available )
+{
+	m_mic->setVisible( available );
+	adjustSize();
+}
+
+
+
+void LabAudioTeacherPanel::setRecording( bool recording )
+{
+	const QSignalBlocker blocker( m_record );
+	m_record->setChecked( recording );
+	m_record->setText( recording ? tr( "● Recording… (click to stop)" ) : tr( "● Record" ) );
 }
 
 
@@ -309,6 +353,11 @@ LabAudioGroupPanel::LabAudioGroupPanel( QWidget* parent ) :
 	regroup->setToolTip( tr( "Mix the students into new groups of the same size." ) );
 	connect( regroup, &QPushButton::clicked, this, &LabAudioGroupPanel::regroupRequested );
 	layout->addWidget( regroup );
+	layout->addLayout( recordRow( this, m_record, tr( "● Record each group" ),
+								  tr( "Record every group's conversation to its own file on this computer (e.g. oral exams). "
+									  "The students see that they are being recorded." ),
+								  [this]( bool record ) { Q_EMIT recordToggled( record ); },
+								  [this]() { Q_EMIT openRecordingsRequested(); } ) );
 
 	auto hint = new QLabel( tr( "To end group work, click \"Group work\" in the toolbar again." ), this );
 	hint->setWordWrap( true );
@@ -382,6 +431,15 @@ void LabAudioGroupPanel::setFocus( int groupId, bool talking )
 	{
 		m_state->setText( tr( "You are listening to group %1." ).arg( m_focusGroup ) );
 	}
+}
+
+
+
+void LabAudioGroupPanel::setRecording( bool recording )
+{
+	const QSignalBlocker blocker( m_record );
+	m_record->setChecked( recording );
+	m_record->setText( recording ? tr( "● Recording each group… (click to stop)" ) : tr( "● Record each group" ) );
 }
 
 
