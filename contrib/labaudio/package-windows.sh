@@ -27,7 +27,7 @@ for f in "$STAGE"/plugins/lib*.dll "$STAGE"/plugins/vnchooks.dll; do mv "$f" "$S
 shopt -u nullglob
 
 echo "== translations"
-for ts in "$SRC"/translations/veyon_*.ts; do
+for ts in "$SRC"/translations/veyon_*.ts "$SRC"/translations/labaudio_*.ts; do
 	lrelease -silent "$ts" -qm "$STAGE/translations/$(basename "${ts%.ts}").qm"
 done
 

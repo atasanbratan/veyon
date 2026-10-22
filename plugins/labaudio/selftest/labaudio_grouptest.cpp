@@ -16,6 +16,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QTcpSocket>
+#include <QTranslator>
 #include <QtEndian>
 #include <cstdio>
 #include <cstdlib>
@@ -129,10 +130,16 @@ int main( int argc, char** argv )
 	QDir( recordingsDir ).removeRecursively();
 	qputenv( "LABAUDIO_RECORDINGS_DIR", recordingsDir.toLocal8Bit() );
 
-	// --ui <dir>: render the teacher's dialog and panel to PNG files for a visual check.
+	// --ui <dir> [labaudio_xx.qm]: render the teacher's dialog and panel to PNG files for a visual check,
+	// optionally translated.
 	if( argc > 2 && QByteArray( argv[1] ) == "--ui" )
 	{
 		const QString dir = QString::fromLocal8Bit( argv[2] );
+		QTranslator translator;
+		if( argc > 3 && translator.load( QString::fromLocal8Bit( argv[3] ) ) )
+		{
+			QCoreApplication::installTranslator( &translator );
+		}
 		LabAudioGroupDialog dialog( { QStringLiteral( "Anna Petrova" ), QStringLiteral( "Ben Koch" ),
 									  QStringLiteral( "Carla Diaz" ), QStringLiteral( "Dan Ivanov" ),
 									  QStringLiteral( "Emre Yilmaz" ), QStringLiteral( "PC-07" ),

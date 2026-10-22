@@ -198,6 +198,8 @@ private:
 	// ✋ button on the notice (state kept by the LabAudioCalls plugin)
 	void sendCalling( bool calling );
 
+	// Before the features: their names are translated when they are created.
+	const bool m_translationsLoaded;
 	const Feature m_labAudioFeature;
 	const Feature m_broadcastFeature;
 	const Feature m_talkFeature;

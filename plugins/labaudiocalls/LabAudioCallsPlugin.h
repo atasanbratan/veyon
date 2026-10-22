@@ -115,6 +115,7 @@ private:
 	void setCallsAllowed( bool allowed );
 	static QString studentLabel( const ComputerControlInterface::Pointer& computerControlInterface );
 
+	const bool m_translationsLoaded;	// before the features, see LabAudioFeaturePlugin
 	const Feature m_callsFeature;
 	const Feature m_callTrayFeature;
 	const FeatureList m_features;

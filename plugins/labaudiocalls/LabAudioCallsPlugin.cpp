@@ -33,6 +33,7 @@
 #include "LabAudioCallsPlugin.h"
 #include "PlatformPluginInterface.h"
 #include "PlatformSessionFunctions.h"
+#include "TranslationLoader.h"
 #include "VeyonMasterInterface.h"
 #include "VeyonServerInterface.h"
 #include "VeyonWorkerInterface.h"
@@ -43,6 +44,7 @@ using namespace LabAudioCallProtocol;
 
 LabAudioCallsPlugin::LabAudioCallsPlugin( QObject* parent ) :
 	QObject( parent ),
+	m_translationsLoaded( TranslationLoader::load( QStringLiteral( "labaudio" ) ) ),
 	m_callsFeature( QStringLiteral( "LabAudioStudentCalls" ),
 					Feature::Flag::Action | Feature::Flag::Master,
 					Feature::Uid( "5e0b1f7a-3c2d-4b8e-9f61-7a4d2c8e1b05" ),

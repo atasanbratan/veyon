@@ -140,6 +140,20 @@ payload); calls travel through Veyon, not this connection. Max payload 8 KiB; He
 - Firewall: the hub runs inside `veyon-worker.exe`; the installer adds the inbound rule "Veyon Lab Audio" (TCP 11500–11599,
   all profiles) and removes it on uninstall.
 
+## Languages
+
+English (source), Russian and Turkmen, for both plugins: `translations/labaudio_ru.ts`, `labaudio_tk.ts`, compiled
+to `labaudio_*.qm` by the packaging script and loaded with Veyon's `TranslationLoader` (language set in the Veyon
+Configurator, otherwise the Windows language of that PC) before the features are created. Terms: студент /
+преподаватель, talyp / mugallym; "Lab audio" = Лингафон / Lingafon.
+
+- Texts and translations: `translations/labaudio_translations.json` (source → [Russian, Turkmen]).
+- After changing texts: run `lupdate` (command in `contrib/labaudio/update-translations.ps1`), add the new texts to the
+  JSON file, then run `update-translations.ps1`; it fills both `.ts` files and lists texts that are still missing.
+- Veyon itself has no Turkmen translation; the empty `translations/veyon_tk.ts` only makes "Turkmen" selectable in the
+  Configurator (Veyon's own texts then stay English, Lab audio's are Turkmen).
+- The Turkmen texts should be reviewed by a native speaker.
+
 ## Wait list
 
-- Translations.
+(empty)

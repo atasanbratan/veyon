@@ -177,7 +177,7 @@ void showConnectionStatus( QLabel* label, int connected, int total, const QStrin
 		auto names = QStringList( waiting.mid( 0, MaxNames ) ).join( QStringLiteral( ", " ) );
 		if( waiting.size() > MaxNames )
 		{
-			names += QObject::tr( " and %n more", nullptr, int( waiting.size() ) - MaxNames );
+			names += QObject::tr( " and %1 more" ).arg( int( waiting.size() ) - MaxNames );
 		}
 		label->setText( QObject::tr( "⏳ %1 of %2 students connected – waiting for: %3" )
 							.arg( connected ).arg( total ).arg( names ) );

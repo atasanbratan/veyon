@@ -42,6 +42,7 @@
 #include "Logger.h"
 #include "PlatformPluginInterface.h"
 #include "PlatformSessionFunctions.h"
+#include "TranslationLoader.h"
 #include "VeyonMasterInterface.h"
 #include "VeyonServerInterface.h"
 #include "VeyonWorkerInterface.h"
@@ -52,6 +53,9 @@ using namespace LabAudioProtocol;
 
 LabAudioFeaturePlugin::LabAudioFeaturePlugin( QObject* parent ) :
 	QObject( parent ),
+	// labaudio_<language>.qm (Russian, Turkmen) in Veyon's translations folder; language as configured in Veyon,
+	// otherwise the Windows language.
+	m_translationsLoaded( TranslationLoader::load( QStringLiteral( "labaudio" ) ) ),
 	m_labAudioFeature( QStringLiteral( "LabAudio" ),
 					   Feature::Flag::Mode | Feature::Flag::AllComponents,
 					   Feature::Uid( "910da020-7bf3-4144-a476-7e18a2e0794c" ),
