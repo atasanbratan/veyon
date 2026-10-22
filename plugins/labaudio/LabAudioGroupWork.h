@@ -31,6 +31,7 @@
 
 class QCheckBox;
 class QGridLayout;
+class QKeyEvent;
 class QLabel;
 class QListWidget;
 class QPushButton;
@@ -63,12 +64,65 @@ private:
 	QList<QList<int>> m_groups;
 };
 
+// Teacher microphone: mute, or push-to-talk (hold the button or the Space key).
+class LabAudioMicControls : public QWidget
+{
+	Q_OBJECT
+public:
+	explicit LabAudioMicControls( QWidget* parent = nullptr );
+
+	bool isMuted() const;
+	// Space key while the panel is active (auto-repeat is ignored by the caller).
+	void setHolding( bool holding );
+
+Q_SIGNALS:
+	void mutedChanged( bool muted );
+
+private:
+	void refresh();
+
+	QPushButton* m_mute;
+	QCheckBox* m_pushToTalk;
+	QPushButton* m_hold;
+	bool m_holding{false};
+	bool m_lastMuted{false};
+};
+
+// Small window next to Veyon Master while the teacher speaks to students or talks with one.
+class LabAudioTeacherPanel : public QWidget
+{
+	Q_OBJECT
+public:
+	explicit LabAudioTeacherPanel( QWidget* parent = nullptr );
+
+	void setMode( const QString& description, const QString& stopHint );
+	LabAudioMicControls* micControls() const
+	{
+		return m_mic;
+	}
+
+protected:
+	void closeEvent( QCloseEvent* event ) override;
+	void keyPressEvent( QKeyEvent* event ) override;
+	void keyReleaseEvent( QKeyEvent* event ) override;
+
+private:
+	QLabel* m_mode;
+	QLabel* m_hint;
+	LabAudioMicControls* m_mic;
+};
+
 // Stays next to Veyon Master during group work: lets the teacher listen to or join one group.
 class LabAudioGroupPanel : public QWidget
 {
 	Q_OBJECT
 public:
 	explicit LabAudioGroupPanel( QWidget* parent = nullptr );
+
+	LabAudioMicControls* micControls() const
+	{
+		return m_mic;
+	}
 
 	// One entry per group (group id = index + 1) with the member names.
 	void setGroups( const QList<QStringList>& groups );
@@ -81,6 +135,8 @@ Q_SIGNALS:
 
 protected:
 	void closeEvent( QCloseEvent* event ) override;
+	void keyPressEvent( QKeyEvent* event ) override;
+	void keyReleaseEvent( QKeyEvent* event ) override;
 
 private:
 	struct Row
@@ -92,6 +148,7 @@ private:
 
 	QLabel* m_state;
 	QGridLayout* m_grid;
+	LabAudioMicControls* m_mic;
 	QList<Row> m_rows;
 	int m_focusGroup{-1};
 	bool m_talking{false};

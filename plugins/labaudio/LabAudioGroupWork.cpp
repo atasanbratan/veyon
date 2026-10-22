@@ -27,6 +27,8 @@
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QGridLayout>
+#include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QListWidget>
 #include <QPushButton>
@@ -134,10 +136,164 @@ void LabAudioGroupDialog::updatePreview( bool reshuffle )
 
 
 
+namespace
+{
+
+// Space = push-to-talk while a teacher panel is the active window.
+bool handleSpace( LabAudioMicControls* mic, QKeyEvent* event, bool pressed )
+{
+	if( event->key() != Qt::Key_Space )
+	{
+		return false;
+	}
+	if( event->isAutoRepeat() == false )
+	{
+		mic->setHolding( pressed );
+	}
+	event->accept();
+	return true;
+}
+
+}
+
+
+
+LabAudioMicControls::LabAudioMicControls( QWidget* parent ) :
+	QWidget( parent ),
+	m_mute( new QPushButton( this ) ),
+	m_pushToTalk( new QCheckBox( tr( "Push to talk" ), this ) ),
+	m_hold( new QPushButton( tr( "Hold to talk (or Space)" ), this ) )
+{
+	auto layout = new QHBoxLayout( this );
+	layout->setContentsMargins( 0, 0, 0, 0 );
+	layout->addWidget( m_mute );
+	layout->addWidget( m_pushToTalk );
+	layout->addWidget( m_hold, 1 );
+
+	// Without keyboard focus on the buttons, Space reaches the panel for push-to-talk.
+	m_mute->setFocusPolicy( Qt::NoFocus );
+	m_pushToTalk->setFocusPolicy( Qt::NoFocus );
+	m_hold->setFocusPolicy( Qt::NoFocus );
+	m_mute->setCheckable( true );
+	m_pushToTalk->setToolTip( tr( "Students only hear you while you hold the button or the Space key." ) );
+
+	connect( m_mute, &QPushButton::toggled, this, &LabAudioMicControls::refresh );
+	connect( m_pushToTalk, &QCheckBox::toggled, this, &LabAudioMicControls::refresh );
+	connect( m_hold, &QPushButton::pressed, this, [this]() { setHolding( true ); } );
+	connect( m_hold, &QPushButton::released, this, [this]() { setHolding( false ); } );
+	refresh();
+}
+
+
+
+bool LabAudioMicControls::isMuted() const
+{
+	return m_mute->isChecked() || ( m_pushToTalk->isChecked() && m_holding == false );
+}
+
+
+
+void LabAudioMicControls::setHolding( bool holding )
+{
+	if( m_pushToTalk->isChecked() && holding != m_holding )
+	{
+		m_holding = holding;
+		refresh();
+	}
+}
+
+
+
+void LabAudioMicControls::refresh()
+{
+	if( m_pushToTalk->isChecked() == false )
+	{
+		m_holding = false;
+	}
+	m_hold->setVisible( m_pushToTalk->isChecked() );
+	m_mute->setText( m_mute->isChecked() ? tr( "Microphone off" ) : tr( "Microphone on" ) );
+	m_mute->setStyleSheet( m_mute->isChecked() ? QStringLiteral( "QPushButton { color: white; background: #b91c1c; }" )
+											   : QString() );
+	m_hold->setText( m_holding ? tr( "Talking…" ) : tr( "Hold to talk (or Space)" ) );
+
+	const auto muted = isMuted();
+	if( muted != m_lastMuted )
+	{
+		m_lastMuted = muted;
+		Q_EMIT mutedChanged( muted );
+	}
+}
+
+
+
+LabAudioTeacherPanel::LabAudioTeacherPanel( QWidget* parent ) :
+	QWidget( parent, Qt::Tool | Qt::CustomizeWindowHint | Qt::WindowTitleHint ),
+	m_mode( new QLabel( this ) ),
+	m_hint( new QLabel( this ) ),
+	m_mic( new LabAudioMicControls( this ) )
+{
+	setWindowTitle( tr( "Lab audio" ) );
+	setMinimumWidth( 420 );
+	auto layout = new QVBoxLayout( this );
+	m_mode->setWordWrap( true );
+	m_hint->setWordWrap( true );
+	m_hint->setEnabled( false );
+	layout->addWidget( m_mode );
+	layout->addWidget( m_mic );
+	layout->addWidget( m_hint );
+}
+
+
+
+void LabAudioTeacherPanel::setMode( const QString& description, const QString& stopHint )
+{
+	m_mode->setText( QStringLiteral( "<b>%1</b>" ).arg( description.toHtmlEscaped() ) );
+	m_hint->setText( stopHint );
+	adjustSize();
+}
+
+
+
+void LabAudioTeacherPanel::closeEvent( QCloseEvent* event )
+{
+	// The mode ends from the Veyon Master toolbar; programmatic closes are allowed.
+	if( event->spontaneous() )
+	{
+		event->ignore();
+	}
+	else
+	{
+		event->accept();
+	}
+}
+
+
+
+void LabAudioTeacherPanel::keyPressEvent( QKeyEvent* event )
+{
+	if( handleSpace( m_mic, event, true ) == false )
+	{
+		QWidget::keyPressEvent( event );
+	}
+}
+
+
+
+void LabAudioTeacherPanel::keyReleaseEvent( QKeyEvent* event )
+{
+	if( handleSpace( m_mic, event, false ) == false )
+	{
+		QWidget::keyReleaseEvent( event );
+	}
+}
+
+
+
 LabAudioGroupPanel::LabAudioGroupPanel( QWidget* parent ) :
 	QWidget( parent, Qt::Tool | Qt::CustomizeWindowHint | Qt::WindowTitleHint ),
 	m_state( new QLabel( this ) ),
-	m_grid( new QGridLayout )
+	m_grid( new QGridLayout ),
+	m_mic( new LabAudioMicControls( this ) )
 {
 	setWindowTitle( tr( "Group work" ) );
 	setMinimumWidth( 480 );
@@ -146,6 +302,8 @@ LabAudioGroupPanel::LabAudioGroupPanel( QWidget* parent ) :
 	m_state->setWordWrap( true );
 	layout->addWidget( m_state );
 	layout->addLayout( m_grid );
+	m_mic->setToolTip( tr( "Your microphone while you talk with a group" ) );
+	layout->addWidget( m_mic );
 
 	auto regroup = new QPushButton( tr( "New groups" ), this );
 	regroup->setToolTip( tr( "Mix the students into new groups of the same size." ) );
@@ -223,6 +381,26 @@ void LabAudioGroupPanel::setFocus( int groupId, bool talking )
 	else
 	{
 		m_state->setText( tr( "You are listening to group %1." ).arg( m_focusGroup ) );
+	}
+}
+
+
+
+void LabAudioGroupPanel::keyPressEvent( QKeyEvent* event )
+{
+	if( handleSpace( m_mic, event, true ) == false )
+	{
+		QWidget::keyPressEvent( event );
+	}
+}
+
+
+
+void LabAudioGroupPanel::keyReleaseEvent( QKeyEvent* event )
+{
+	if( handleSpace( m_mic, event, false ) == false )
+	{
+		QWidget::keyReleaseEvent( event );
 	}
 }
 

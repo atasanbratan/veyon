@@ -15,6 +15,16 @@ student, or listens to a student's microphone. Built as a Veyon feature plugin (
 
 Starting another mode on a computer replaces its previous mode. "Stop" on the group stops everything.
 
+### Classroom controls
+
+- **Call the teacher**: a button on every student notice. The hub lists calls (name and computer from Veyon Master,
+  group, time) in a "Students calling" window on the teacher's screen with a beep; **Done** resets the student's
+  button. A call survives a reconnect and ends when the student disconnects (`CallTeacher` frame).
+- **Student volume**: slider on the notice, 0–200 %, applied in the mixer, remembered per Windows user.
+- **Teacher microphone**: the teacher panel (Speak / Talk) and the group panel have **Microphone on/off** and
+  **Push to talk** (hold the button or Space while the panel is active). Muting sends silent frames so the
+  students' jitter buffers do not treat the pause as network jitter.
+
 ### Group work
 
 A dialog asks for the group size (2–6, default pairs) and whether to mix students randomly; a single student left over
@@ -61,7 +71,7 @@ Veyon Master (teacher)                    Veyon Server (each PC)            Work
 ## Wire protocol (`LabAudioProtocol.h`)
 
 `[u32 length][u8 type][payload]` over TCP (Nagle disabled). Types: Hello (version, role flags, token), HelloAck,
-Audio (u32 sequence + Opus packet), Bye, Status (u8 teacher flags), PeerAudio (u32 source id + Audio payload). Max payload 8 KiB; the first frame must be Hello within 5 s.
+Audio (u32 sequence + Opus packet), Bye, Status (u8 teacher flags), PeerAudio (u32 source id + Audio payload), CallTeacher (u8 calling + UTF-8 name). Max payload 8 KiB; the first frame must be Hello within 5 s.
 
 ## Security
 
@@ -76,5 +86,5 @@ Audio (u32 sequence + Opus packet), Bye, Status (u8 teacher flags), PeerAudio (u
 
 ## Not in this first version
 
-per-student volume, push-to-talk, recording, audio encryption, configuration page
+recording, audio encryption, configuration page
 (port is fixed at 11500 + session id), translations.

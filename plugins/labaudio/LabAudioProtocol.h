@@ -51,8 +51,11 @@ enum class FrameType : quint8
 	Audio = 3,		// both directions: u32 sequence, Opus packet
 	Bye = 4,
 	Status = 5,		// hub -> client: u8 StatusFlag bits (what the teacher does with the client's group)
-	PeerAudio = 6	// hub -> client: u32 source id, u32 sequence, Opus packet of a group member
+	PeerAudio = 6,	// hub -> client: u32 source id, u32 sequence, Opus packet of a group member
+	CallTeacher = 7	// client -> hub: u8 calling (1/0), UTF-8 student name; hub -> client: u8 0 = call answered
 };
+
+static constexpr int MaxNameBytes = 200;
 
 // What a client does in the current lab mode (bit flags).
 enum RoleFlag : quint8

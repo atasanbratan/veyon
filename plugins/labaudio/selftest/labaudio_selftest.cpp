@@ -124,6 +124,25 @@ static void testMixer()
 	std::printf( "      decoded RMS %.3f (sine 0.5 peak -> ~0.354)\n", level );
 	CHECK( level > 0.25 && level < 0.45, "decoded audio has the expected level" );
 
+	// The student's volume slider scales the output.
+	LabAudioMixer quiet;
+	quiet.setOutputFormat( format );
+	quiet.open( QIODevice::ReadOnly | QIODevice::Unbuffered );
+	quiet.setGain( 0.5f );
+	auto encoderGain = opus_encoder_create( SampleRate, Channels, OPUS_APPLICATION_VOIP, &err );
+	for( int i = 0; i < 6; ++i )
+	{
+		quiet.addPacket( 1, quint32( i ), encodeSineFrame( encoderGain, i ) );
+	}
+	QByteArray quietOut;
+	for( int i = 0; i < 4; ++i )
+	{
+		quietOut += quiet.read( FrameSamples * 2 );
+	}
+	const auto quietLevel = rms( quietOut );
+	std::printf( "      volume 50%% RMS %.3f\n", quietLevel );
+	CHECK( quietLevel > level * 0.4 && quietLevel < level * 0.6, "volume 50% halves the level" );
+
 	// Two streams are summed.
 	LabAudioMixer two;
 	two.setOutputFormat( format );

@@ -31,11 +31,14 @@
 
 class QLabel;
 class QProgressBar;
+class QPushButton;
+class QSlider;
 class QTcpSocket;
 class LabAudioCapture;
 class LabAudioPlayback;
 
-// Always-visible notice on the student's screen while lab audio is active.
+// Always-visible notice on the student's screen while lab audio is active, with a volume slider
+// and a "Call the teacher" button.
 class LabAudioIndicator : public QWidget
 {
 	Q_OBJECT
@@ -45,15 +48,27 @@ public:
 	void setStatus( const QString& status );
 	void setLevel( float level );
 	void setTeacherStatus( quint8 statusFlags );
+	void setCallAnswered();
+	// Last volume chosen by this student (percent, 100 = unchanged).
+	static int savedVolume();
+
+Q_SIGNALS:
+	void volumeChanged( int percent );
+	void callToggled( bool calling );
 
 protected:
 	void closeEvent( QCloseEvent* event ) override;
 
 private:
+	void updateCallButton();
+	void placeOnScreen();
+
 	QLabel* m_title;
 	QLabel* m_status;
 	QLabel* m_teacher{nullptr};
 	QProgressBar* m_level{nullptr};
+	QSlider* m_volume{nullptr};
+	QPushButton* m_call{nullptr};
 };
 
 // Connects to the teacher's hub, plays the teacher's voice and/or sends the microphone.
@@ -63,8 +78,15 @@ class LabAudioClient : public QObject
 public:
 	// hosts: addresses of the teacher's computer, tried in order (the first one is the preferred route).
 	// groupMembers: names of the other students in the group (group work only).
+	// studentName: shown to the teacher when this student calls.
 	LabAudioClient( const QStringList& hosts, int port, const QByteArray& token, quint8 roles,
-					const QStringList& groupMembers = {}, QObject* parent = nullptr );
+					const QStringList& groupMembers = {}, const QString& studentName = {}, QObject* parent = nullptr );
+
+	LabAudioIndicator* indicator() const
+	{
+		return m_indicator;
+	}
+	void setCalling( bool calling );
 	~LabAudioClient() override;
 
 	static constexpr int ReconnectIntervalMs = 2000;
@@ -75,6 +97,7 @@ Q_SIGNALS:
 	void audioReceived( int bytes );
 	void peerAudioReceived( int sourceId );
 	void teacherStatusChanged( quint8 statusFlags );
+	void callAnswered();
 
 private:
 	void connectToHub();
@@ -95,6 +118,8 @@ private:
 	int m_port;
 	QByteArray m_token;
 	quint8 m_roles;
+	QString m_studentName;
+	bool m_calling{false};
 	QTcpSocket* m_socket;
 	LabAudioProtocol::FrameReader m_reader;
 	QTimer m_reconnectTimer;

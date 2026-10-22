@@ -53,7 +53,9 @@ public:
 		GroupTokens,	// QVariantMap: hex token -> group id
 		FocusGroup,
 		TeacherTalks,
-		GroupMembers
+		GroupMembers,
+		StudentName,
+		TeacherMuted
 	};
 	Q_ENUM(Argument)
 
@@ -141,10 +143,16 @@ private:
 	void regroup();
 	void setGroupFocus( int groupId, bool teacherTalks );
 	void endGroupWork();
+	void startClient( const ComputerControlInterface::Pointer& student, const QByteArray& token, int roles,
+					  const QStringList& groupMembers = {} );
+	void showTeacherPanel( VeyonMasterInterface& master, const Feature& feature );
+	void setTeacherMuted( bool muted );
 	void sendHubCommand();
 	int hubPort() const;
 	static QStringList localAddresses();
 	static QString studentName( const ComputerControlInterface::Pointer& computerControlInterface );
+	// Name plus computer, e.g. "Anna Petrova (PC-07)", for the teacher's list of calls.
+	static QString studentLabel( const ComputerControlInterface::Pointer& computerControlInterface );
 
 	const Feature m_labAudioFeature;
 	const Feature m_broadcastFeature;
@@ -168,6 +176,8 @@ private:
 	int m_focusGroup{-1};
 	bool m_teacherTalks{false};
 	QPointer<LabAudioGroupPanel> m_groupPanel;
+	QPointer<LabAudioTeacherPanel> m_teacherPanel;
+	bool m_teacherMuted{false};
 
 	LabAudioHub* m_hub{nullptr};
 	LabAudioClient* m_client{nullptr};

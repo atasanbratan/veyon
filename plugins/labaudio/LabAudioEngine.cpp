@@ -31,6 +31,8 @@
 
 #include <opus/opus.h>
 
+#include <algorithm>
+
 #include "LabAudioEngine.h"
 #include "LabAudioProtocol.h"
 
@@ -212,6 +214,11 @@ void LabAudioCapture::encodeFrames()
 	while( m_pending.size() >= FrameSamples && m_encoder )
 	{
 		int peak = 0;
+		if( m_muted )
+		{
+			// Keep sending (silent) frames so receivers' jitter buffers do not mistake a mute for jitter.
+			std::fill( m_pending.begin(), m_pending.begin() + FrameSamples, qint16( 0 ) );
+		}
 		for( int i = 0; i < FrameSamples; ++i )
 		{
 			peak = qMax( peak, qAbs( int( m_pending.at( i ) ) ) );
@@ -400,7 +407,8 @@ qint64 LabAudioMixer::readData( char* data, qint64 maxSize )
 			m_nextSample = mixedSample();
 			m_resamplePosition -= 1.0;
 		}
-		const float value = ( m_currentSample + ( m_nextSample - m_currentSample ) * float( m_resamplePosition ) ) / 32768.0f;
+		const float value = m_gain *
+							( m_currentSample + ( m_nextSample - m_currentSample ) * float( m_resamplePosition ) ) / 32768.0f;
 		m_resamplePosition += step;
 		for( int c = 0; c < m_format.channelCount(); ++c )
 		{

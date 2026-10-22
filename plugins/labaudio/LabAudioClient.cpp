@@ -24,9 +24,14 @@
 
 #include <QCloseEvent>
 #include <QGuiApplication>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QProgressBar>
+#include <QPushButton>
 #include <QScreen>
+#include <QSettings>
+#include <QSignalBlocker>
+#include <QSlider>
 #include <QTcpSocket>
 #include <QVBoxLayout>
 #include <QtEndian>
@@ -99,13 +104,78 @@ LabAudioIndicator::LabAudioIndicator( quint8 roles, const QStringList& groupMemb
 		layout->addWidget( m_level );
 	}
 
+	auto controls = new QHBoxLayout;
+	if( roles & ( ReceiveTeacher | ReceivePeers ) )
+	{
+		auto volumeLabel = new QLabel( tr( "Volume" ), this );
+		m_volume = new QSlider( Qt::Horizontal, this );
+		m_volume->setRange( 0, 200 );
+		m_volume->setPageStep( 10 );
+		m_volume->setValue( savedVolume() );
+		m_volume->setToolTip( tr( "How loud you hear the teacher and your group" ) );
+		m_volume->setAccessibleName( tr( "Volume" ) );
+		connect( m_volume, &QSlider::valueChanged, this, [this]( int percent ) {
+			QSettings( QStringLiteral( "Veyon Solutions" ), QStringLiteral( "LabAudio" ) )
+				.setValue( QStringLiteral( "volume" ), percent );
+			Q_EMIT volumeChanged( percent );
+		} );
+		controls->addWidget( volumeLabel );
+		controls->addWidget( m_volume, 1 );
+	}
+	m_call = new QPushButton( this );
+	m_call->setCheckable( true );
+	m_call->setFocusPolicy( Qt::NoFocus );
+	m_call->setStyleSheet( QStringLiteral( "QPushButton { color: white; background: #374151; border: 1px solid #6b7280;"
+										   " border-radius: 4px; padding: 4px 10px; }"
+										   "QPushButton:checked { background: #b45309; border-color: #f59e0b; }" ) );
+	connect( m_call, &QPushButton::toggled, this, [this]( bool calling ) {
+		updateCallButton();
+		Q_EMIT callToggled( calling );
+	} );
+	controls->addWidget( m_call );
+	layout->addLayout( controls );
+	updateCallButton();
+
+	placeOnScreen();
+	show();
+}
+
+
+
+int LabAudioIndicator::savedVolume()
+{
+	return qBound( 0, QSettings( QStringLiteral( "Veyon Solutions" ), QStringLiteral( "LabAudio" ) )
+						  .value( QStringLiteral( "volume" ), 100 ).toInt(), 200 );
+}
+
+
+
+void LabAudioIndicator::setCallAnswered()
+{
+	// The teacher pressed "Done": reset without sending the change back.
+	const QSignalBlocker blocker( m_call );
+	m_call->setChecked( false );
+	updateCallButton();
+}
+
+
+
+void LabAudioIndicator::updateCallButton()
+{
+	m_call->setText( m_call->isChecked() ? tr( "✋ Calling the teacher… (cancel)" ) : tr( "✋ Call the teacher" ) );
+	placeOnScreen();
+}
+
+
+
+void LabAudioIndicator::placeOnScreen()
+{
 	adjustSize();
 	if( const auto screen = QGuiApplication::primaryScreen() )
 	{
 		const auto area = screen->availableGeometry();
 		move( area.right() - width() - 20, area.bottom() - height() - 20 );
 	}
-	show();
 }
 
 
@@ -113,7 +183,7 @@ LabAudioIndicator::LabAudioIndicator( quint8 roles, const QStringList& groupMemb
 void LabAudioIndicator::setStatus( const QString& status )
 {
 	m_status->setText( status );
-	adjustSize();
+	placeOnScreen();
 }
 
 
@@ -148,12 +218,7 @@ void LabAudioIndicator::setTeacherStatus( quint8 statusFlags )
 	{
 		m_teacher->hide();
 	}
-	adjustSize();
-	if( const auto screen = QGuiApplication::primaryScreen() )
-	{
-		const auto area = screen->availableGeometry();
-		move( area.right() - width() - 20, area.bottom() - height() - 20 );
-	}
+	placeOnScreen();
 }
 
 
@@ -175,16 +240,25 @@ void LabAudioIndicator::closeEvent( QCloseEvent* event )
 
 
 LabAudioClient::LabAudioClient( const QStringList& hosts, int port, const QByteArray& token, quint8 roles,
-								const QStringList& groupMembers, QObject* parent ) :
+								const QStringList& groupMembers, const QString& studentName, QObject* parent ) :
 	QObject( parent ),
 	m_hosts( hosts ),
 	m_port( port ),
 	m_token( token ),
 	m_roles( roles ),
+	m_studentName( studentName ),
 	m_socket( new QTcpSocket( this ) ),
 	m_indicator( new LabAudioIndicator( roles, groupMembers ) )
 {
 	connect( this, &LabAudioClient::teacherStatusChanged, m_indicator, &LabAudioIndicator::setTeacherStatus );
+	connect( this, &LabAudioClient::callAnswered, m_indicator, &LabAudioIndicator::setCallAnswered );
+	connect( m_indicator, &LabAudioIndicator::callToggled, this, &LabAudioClient::setCalling );
+	connect( m_indicator, &LabAudioIndicator::volumeChanged, this, [this]( int percent ) {
+		if( m_playback )
+		{
+			m_playback->mixer().setGain( float( percent ) / 100.0f );
+		}
+	} );
 	connect( m_socket, &QTcpSocket::connected, this, &LabAudioClient::onConnected );
 	connect( m_socket, &QTcpSocket::readyRead, this, &LabAudioClient::onReadyRead );
 	connect( m_socket, &QTcpSocket::disconnected, this, &LabAudioClient::onDisconnected );
@@ -236,6 +310,22 @@ LabAudioClient::~LabAudioClient()
 	m_socket->abort();
 	stopAudio();
 	delete m_indicator;
+}
+
+
+
+void LabAudioClient::setCalling( bool calling )
+{
+	m_calling = calling;
+	if( m_accepted && m_socket->state() == QAbstractSocket::ConnectedState )
+	{
+		QByteArray payload( 1, calling ? 1 : 0 );
+		if( calling )
+		{
+			payload.append( m_studentName.toUtf8().left( MaxNameBytes ) );
+		}
+		m_socket->write( frame( FrameType::CallTeacher, payload ) );
+	}
 }
 
 
@@ -296,6 +386,11 @@ void LabAudioClient::onReadyRead()
 			{
 				m_accepted = true;
 				startAudio();
+				if( m_calling )
+				{
+					// A call survives a reconnect.
+					setCalling( true );
+				}
 			}
 			else
 			{
@@ -329,6 +424,11 @@ void LabAudioClient::onReadyRead()
 		else if( type == FrameType::Status && payload.size() == 1 )
 		{
 			Q_EMIT teacherStatusChanged( quint8( payload.at( 0 ) ) );
+		}
+		else if( type == FrameType::CallTeacher && payload.size() == 1 && payload.at( 0 ) == 0 )
+		{
+			m_calling = false;
+			Q_EMIT callAnswered();
 		}
 	}
 	if( error )
@@ -378,6 +478,7 @@ void LabAudioClient::startAudio()
 	if( ( m_roles & ( ReceiveTeacher | ReceivePeers ) ) && m_playback == nullptr )
 	{
 		m_playback = new LabAudioPlayback( this );
+		m_playback->mixer().setGain( float( LabAudioIndicator::savedVolume() ) / 100.0f );
 		if( m_playback->start() == false )
 		{
 			problems.append( m_playback->errorString() );

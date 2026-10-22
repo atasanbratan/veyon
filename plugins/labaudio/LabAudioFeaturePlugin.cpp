@@ -105,6 +105,7 @@ LabAudioFeaturePlugin::LabAudioFeaturePlugin( QObject* parent ) :
 LabAudioFeaturePlugin::~LabAudioFeaturePlugin()
 {
 	delete m_groupPanel;
+	delete m_teacherPanel;
 	delete m_client;
 	delete m_hub;
 }
@@ -138,6 +139,64 @@ QString LabAudioFeaturePlugin::studentName( const ComputerControlInterface::Poin
 		user = computerControlInterface->userLoginName().section( QLatin1Char( '\\' ), -1 );
 	}
 	return user.isEmpty() ? computerName : user;
+}
+
+
+
+QString LabAudioFeaturePlugin::studentLabel( const ComputerControlInterface::Pointer& computerControlInterface )
+{
+	if( computerControlInterface.isNull() )
+	{
+		return {};
+	}
+	const auto name = studentName( computerControlInterface );
+	const auto& computer = computerControlInterface->computer();
+	const auto computerName = computer.displayName().isEmpty() ? computerControlInterface->computerName()
+															   : computer.displayName();
+	return ( computerName.isEmpty() || computerName == name ) ? name : QStringLiteral( "%1 (%2)" ).arg( name, computerName );
+}
+
+
+
+void LabAudioFeaturePlugin::startClient( const ComputerControlInterface::Pointer& student, const QByteArray& token,
+										 int roles, const QStringList& groupMembers )
+{
+	controlFeature( m_clientFeature.uid(), Operation::Start,
+					{ { argToString(Argument::Token), token },
+					  { argToString(Argument::Roles), roles },
+					  { argToString(Argument::GroupMembers), groupMembers },
+					  { argToString(Argument::StudentName), studentLabel( student ) } },
+					{ student } );
+}
+
+
+
+void LabAudioFeaturePlugin::setTeacherMuted( bool muted )
+{
+	if( muted != m_teacherMuted )
+	{
+		m_teacherMuted = muted;
+		// Sent at once (not only with the keep-alive) so push-to-talk reacts immediately.
+		sendHubCommand();
+	}
+}
+
+
+
+void LabAudioFeaturePlugin::showTeacherPanel( VeyonMasterInterface& master, const Feature& feature )
+{
+	if( m_teacherPanel.isNull() )
+	{
+		m_teacherPanel = new LabAudioTeacherPanel( master.mainWindow() );
+		connect( m_teacherPanel->micControls(), &LabAudioMicControls::mutedChanged,
+				 this, &LabAudioFeaturePlugin::setTeacherMuted );
+	}
+	const auto description = ( feature == m_talkFeature )
+								 ? tr( "You are talking with %1." ).arg( studentName( master.selectedComputerControlInterfaces().value( 0 ) ) )
+								 : tr( "You are speaking to the students." );
+	m_teacherPanel->setMode( description, tr( "To stop, click \"%1\" in the toolbar again." ).arg( feature.displayName() ) );
+	m_teacherPanel->show();
+	m_teacherPanel->raise();
 }
 
 
@@ -222,7 +281,9 @@ bool LabAudioFeaturePlugin::controlFeature( Feature::Uid featureUid, Operation o
 																					int( ReceiveTeacher ) ).toInt() )
 									.addArgument( Argument::GroupMembers,
 												  arguments.value( argToString(Argument::GroupMembers), QStringList() )
-													  .toStringList() ),
+													  .toStringList() )
+									.addArgument( Argument::StudentName,
+												  arguments.value( argToString(Argument::StudentName), QString() ).toString() ),
 								computerControlInterfaces );
 			return true;
 		}
@@ -254,7 +315,8 @@ void LabAudioFeaturePlugin::sendHubCommand()
 								.addArgument( Argument::HubPort, hubPort() )
 								.addArgument( Argument::GroupTokens, groupTokens )
 								.addArgument( Argument::FocusGroup, m_focusGroup )
-								.addArgument( Argument::TeacherTalks, m_teacherTalks ),
+								.addArgument( Argument::TeacherTalks, m_teacherTalks )
+								.addArgument( Argument::TeacherMuted, m_teacherMuted ),
 							m_hubInterfaces );
 	}
 	else
@@ -321,6 +383,8 @@ bool LabAudioFeaturePlugin::startGroupWork( VeyonMasterInterface& master,
 		m_groupPanel = new LabAudioGroupPanel( master.mainWindow() );
 		connect( m_groupPanel, &LabAudioGroupPanel::focusRequested, this, &LabAudioFeaturePlugin::setGroupFocus );
 		connect( m_groupPanel, &LabAudioGroupPanel::regroupRequested, this, &LabAudioFeaturePlugin::regroup );
+		connect( m_groupPanel->micControls(), &LabAudioMicControls::mutedChanged,
+				 this, &LabAudioFeaturePlugin::setTeacherMuted );
 	}
 	QList<QStringList> groupNames;
 	for( const auto& group : std::as_const( m_groups ) )
@@ -368,11 +432,7 @@ void LabAudioFeaturePlugin::startGroupClients()
 		{
 			auto others = group.names;
 			others.removeAt( i );
-			controlFeature( m_clientFeature.uid(), Operation::Start,
-							{ { argToString(Argument::Token), group.token },
-							  { argToString(Argument::Roles), roles },
-							  { argToString(Argument::GroupMembers), others } },
-							{ group.members[i] } );
+			startClient( group.members[i], group.token, roles, others );
 		}
 	}
 }
@@ -460,9 +520,16 @@ bool LabAudioFeaturePlugin::startMode( VeyonMasterInterface& master, const Featu
 	}
 
 	controlFeature( m_hubFeature.uid(), Operation::Start, {}, { master.localSessionControlInterface().weakPointer() } );
-	controlFeature( m_clientFeature.uid(), Operation::Start,
-					{ { argToString(Argument::Roles), int( roles ) } }, targets );
+	for( const auto& target : std::as_const( targets ) )
+	{
+		// One message per student so each one carries the student's name (shown when calling).
+		startClient( target, m_token, roles );
+	}
 	++m_activeModes;
+	if( roles & ReceiveTeacher )
+	{
+		showTeacherPanel( master, feature );
+	}
 	return true;
 }
 
@@ -478,11 +545,17 @@ bool LabAudioFeaturePlugin::stopFeature( VeyonMasterInterface& master, const Fea
 		{
 			endGroupWork();
 		}
+		if( m_teacherPanel && feature != m_groupWorkFeature )
+		{
+			m_teacherPanel->close();
+			m_teacherPanel->deleteLater();
+		}
 		controlFeature( m_clientFeature.uid(), Operation::Stop, {}, computerControlInterfaces );
 		m_activeModes = qMax( 0, m_activeModes - 1 );
 		if( m_activeModes == 0 || feature == m_labAudioFeature )
 		{
 			m_activeModes = 0;
+			m_teacherMuted = false;
 			controlFeature( m_hubFeature.uid(), Operation::Stop, {},
 							{ master.localSessionControlInterface().weakPointer() } );
 		}
@@ -592,6 +665,7 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonWorkerInterface& worker, 
 			m_hub->setFocus( message.hasArgument( Argument::FocusGroup ) ? message.argument( Argument::FocusGroup ).toInt()
 																		 : LabAudioHub::NoGroup,
 							 message.argument( Argument::TeacherTalks ).toBool() );
+			m_hub->setTeacherMuted( message.argument( Argument::TeacherMuted ).toBool() );
 			return true;
 		}
 		case FeatureCommand::StopHub:
@@ -633,7 +707,8 @@ bool LabAudioFeaturePlugin::handleFeatureMessage( VeyonWorkerInterface& worker, 
 										   port,
 										   message.argument( Argument::Token ).toByteArray(),
 										   roles,
-										   message.argument( Argument::GroupMembers ).toStringList() );
+										   message.argument( Argument::GroupMembers ).toStringList(),
+										   message.argument( Argument::StudentName ).toString() );
 			return true;
 		}
 		case FeatureCommand::StopClient:

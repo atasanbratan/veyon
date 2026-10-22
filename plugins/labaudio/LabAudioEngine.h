@@ -29,6 +29,7 @@
 #include <QIODevice>
 #include <QObject>
 #include <QVector>
+#include <atomic>
 #include <deque>
 
 class QAudioSink;
@@ -54,6 +55,14 @@ public:
 	{
 		return m_error;
 	}
+	void setMuted( bool muted )
+	{
+		m_muted = muted;
+	}
+	bool isMuted() const
+	{
+		return m_muted;
+	}
 
 Q_SIGNALS:
 	void packetReady( const QByteArray& opusPacket );
@@ -71,6 +80,7 @@ private:
 	QVector<qint16> m_pending;	// 48 kHz mono samples not yet encoded
 	double m_resamplePosition{0};
 	qint16 m_lastSample{0};
+	bool m_muted{false};
 	QString m_error;
 };
 
@@ -91,6 +101,11 @@ public:
 	}
 	// Current jitter buffer target of a stream in frames (0 for an unknown stream).
 	int targetFrames( int streamId ) const;
+	// Output volume, 1.0 = unchanged (0..2).
+	void setGain( float gain )
+	{
+		m_gain = qBound( 0.0f, gain, 2.0f );
+	}
 
 	bool isSequential() const override
 	{
@@ -129,6 +144,7 @@ private:
 	double m_resamplePosition{0};
 	qint16 m_currentSample{0};
 	qint16 m_nextSample{0};
+	std::atomic<float> m_gain{1.0f};
 };
 
 // Plays the mixer on the default output device.
