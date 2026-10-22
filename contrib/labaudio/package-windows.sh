@@ -87,4 +87,5 @@ find "$STAGE" \( -iname '*.dll' -o -iname '*.exe' \) -not -path '*/interception/
 echo "== building installer"
 (cd "$STAGE" && makensis -V2 veyon.nsi)
 mv "$STAGE"/veyon-*-labaudio-win64-setup.exe "$ROOT/dist/"
+cp "$SRC/contrib/labaudio/reinstall-veyon.ps1" "$SRC/contrib/labaudio/reinstall-veyon.cmd" "$ROOT/dist/"
 ls -la "$ROOT"/dist/*.exe
